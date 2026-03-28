@@ -26,7 +26,7 @@ jobs:
       ISSUE_DATE: ${{ inputs.issue_date }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -46,13 +46,11 @@ jobs:
         shell: pwsh
         run: |
           git add index.html
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) {
+          $changedFiles = @(git diff --cached --name-only)
+          if ($changedFiles.Count -eq 0) {
             "changed=false" >> $env:GITHUB_OUTPUT
-          } elseif ($LASTEXITCODE -eq 1) {
-            "changed=true" >> $env:GITHUB_OUTPUT
           } else {
-            throw "git diff --cached --quiet failed with exit code $LASTEXITCODE"
+            "changed=true" >> $env:GITHUB_OUTPUT
           }
 
       - name: Commit updated issue
