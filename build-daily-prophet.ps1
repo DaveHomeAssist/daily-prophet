@@ -86,7 +86,8 @@ function HtmlEncode([string]$Text) {
 
 function Write-Utf8File([string]$Path, [string]$Content) {
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+  $normalized = [regex]::Replace($Content, "`r?`n", "`r`n")
+  [System.IO.File]::WriteAllText($Path, $normalized, $utf8NoBom)
 }
 
 $MentionCache = @{}

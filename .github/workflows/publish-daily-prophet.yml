@@ -46,10 +46,13 @@ jobs:
         shell: pwsh
         run: |
           git add index.html
-          if (git diff --cached --quiet) {
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
             "changed=false" >> $env:GITHUB_OUTPUT
-          } else {
+          } elseif ($LASTEXITCODE -eq 1) {
             "changed=true" >> $env:GITHUB_OUTPUT
+          } else {
+            throw "git diff --cached --quiet failed with exit code $LASTEXITCODE"
           }
 
       - name: Commit updated issue
