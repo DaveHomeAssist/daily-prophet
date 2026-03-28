@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Daily Prophet &mdash; Archive</title>
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Cinzel:wght@400;600;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{--p:#f2e8d0;--p2:#ecdfc5;--p3:#d9c9a0;--ink:#1a1208;--ink2:#3d2f1a;--ink3:#6b5535;--gold:#b8902a;--gold3:#e8cc7a;--rule:#8b6914;--red:#8b1a1a;--red2:#5c0f0f;--sh:rgba(26,18,8,.32);}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#18110a;min-height:100vh;padding:2rem 1rem 5rem;font-family:'IM Fell English',Georgia,serif;color:var(--ink);}
+.paper{max-width:920px;margin:0 auto;background:var(--p);background-image:linear-gradient(158deg,#f6eed9 0%,#f2e8d0 40%,#ecdfc5 75%,#e4d5b5 100%);box-shadow:0 0 0 1px var(--p3),0 6px 14px var(--sh),0 32px 90px rgba(0,0,0,.7);position:relative;overflow:hidden;}
+.paper::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(ellipse at 0% 0%,rgba(90,60,15,.13) 0%,transparent 36%),radial-gradient(ellipse at 100% 100%,rgba(90,60,15,.13) 0%,transparent 36%);}
+.masthead{padding:1.8rem 2.5rem 0;text-align:center;border-bottom:3px double var(--rule);position:relative;z-index:2;}
+.mh-bar{display:flex;align-items:center;gap:.8rem;margin-bottom:.55rem;}
+.mh-rule{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--rule),transparent);}
+.mh-eyebrow{font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.3em;color:var(--ink3);text-transform:uppercase;white-space:nowrap;}
+.mh-title{font-family:'UnifrakturMaguntia',cursive;font-size:clamp(3rem,9vw,6.2rem);color:var(--ink);line-height:.93;text-shadow:2px 2px 0 rgba(180,140,60,.15);margin-bottom:.22rem;}
+.mh-subtitle{font-family:'IM Fell English',serif;font-style:italic;font-size:.82rem;color:var(--ink3);letter-spacing:.07em;margin-bottom:.65rem;}
+.mh-meta{display:flex;justify-content:center;align-items:center;font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.1em;color:var(--ink2);padding:.42rem 0 .6rem;border-top:1px solid var(--p3);margin-top:.35rem;}
+.body{padding:1.4rem 2.5rem 2.5rem;position:relative;z-index:2;}
+.archive-head{font-family:'Cinzel',serif;font-size:.7rem;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--ink2);margin-bottom:.8rem;}
+.archive-list{border:1px solid var(--p3);background:rgba(255,255,255,.12);}
+.archive-row{display:grid;grid-template-columns:2.3fr 1.4fr 1.4fr 2.4fr;gap:.8rem;align-items:center;padding:.75rem 1rem;border-bottom:1px dotted rgba(139,105,20,.28);}
+.archive-row:last-child{border-bottom:none;}
+.archive-date,.archive-issue{font-size:.88rem;color:var(--ink2);}
+.archive-link{font-family:'IM Fell English SC',serif;font-size:.68rem;letter-spacing:.06em;color:var(--gold);text-decoration:none;}
+.archive-link:hover{text-decoration:underline;}
+.badge{display:inline-block;padding:.22rem .6rem;border:1px solid currentColor;font-family:'Cinzel',serif;font-size:.62rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;}
+.badge-morning{color:var(--gold);background:rgba(184,144,42,.08);}
+.badge-evening{color:#6b4ea0;background:rgba(107,78,160,.08);}
+.badge-breaking{color:var(--red);background:rgba(139,26,26,.08);}
+.archive-empty{padding:1rem;font-size:.9rem;color:var(--ink3);font-style:italic;}
+.footer{text-align:center;padding:1.1rem 2.5rem 1.7rem;border-top:3px double var(--rule);}
+.footer-txt{font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.18em;color:var(--ink3);}
+.footer-link{display:inline-block;margin-top:.45rem;font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.18em;color:var(--gold);text-decoration:none;}
+@media(max-width:700px){.masthead,.body,.footer{padding-left:1.4rem;padding-right:1.4rem;}.archive-row{grid-template-columns:1fr;gap:.35rem;}}
+</style>
+</head>
+<body>
+<div class="paper">
+  <div class="masthead">
+    <div class="mh-bar">
+      <div class="mh-rule"></div>
+      <div class="mh-eyebrow">Curated from your universe &middot; Est. by order of the Ministry</div>
+      <div class="mh-rule"></div>
+    </div>
+    <div class="mh-title">The Daily Prophet &mdash; Archive</div>
+    <div class="mh-subtitle">Past owl-posted editions from the Daily Prophet Issues desk</div>
+    <div class="mh-meta">Collected from DB | Daily Prophet Issues</div>
+  </div>
+  <div class="body">
+    <div class="archive-head">Issue Ledger</div>
+    <div class="archive-list">
+<div class="archive-row">
+  <div class="archive-date">Saturday, 28 March 2026</div>
+  <div><span class="badge badge-morning">Morning Edition</span></div>
+  <div class="archive-issue">20260328-AM</div>
+  <div><a class="archive-link" href="20260328-AM.html">issues/20260328-AM.html</a></div>
+</div>
+    </div>
+  </div>
+  <div class="footer">
+    <div class="footer-txt">Printed by Order of the Ministry of Magic &nbsp;&middot;&nbsp; Archive Ledger</div>
+    <a class="footer-link" href="../">Return to Today&apos;s Issue</a>
+  </div>
+</div>
+</body>
+</html>

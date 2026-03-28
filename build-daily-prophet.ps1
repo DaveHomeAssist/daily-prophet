@@ -5,6 +5,8 @@ $ErrorActionPreference = 'Stop'
 
 $DatabaseId = '331255fc8f4480d59f92ffb703398031'
 $OutputPath = Join-Path $PSScriptRoot 'index.html'
+$IssuesDirectory = Join-Path $PSScriptRoot 'issues'
+$ArchiveIndexPath = Join-Path $IssuesDirectory 'index.html'
 $EmDash = [string][char]0x2014
 $EnDash = [string][char]0x2013
 $DashPattern = '\s*(' + [regex]::Escape($EmDash) + '|' + [regex]::Escape($EnDash) + '|-)\s*'
@@ -59,6 +61,10 @@ function Invoke-NotionJson([string]$Method, [string]$Uri, $Body = $null) {
   return Invoke-RestMethod @params
 }
 
+function Invoke-DatabaseQuery($Body) {
+  return Invoke-NotionJson -Method Post -Uri "https://api.notion.com/v1/databases/$DatabaseId/query" -Body $Body
+}
+
 function Get-NotionChildren([string]$BlockId) {
   $results = @()
   $cursor = $null
@@ -70,6 +76,33 @@ function Get-NotionChildren([string]$BlockId) {
     }
 
     $response = Invoke-NotionJson -Method Get -Uri $uri
+    if ($response.results) {
+      $results += @($response.results)
+    }
+    $cursor = $response.next_cursor
+  } while ($cursor)
+
+  return @($results)
+}
+
+function Get-AllIssuePages() {
+  $results = @()
+  $cursor = $null
+
+  do {
+    $body = @{
+      sorts = @(
+        @{ property = 'Date'; direction = 'descending' },
+        @{ property = 'Issue ID'; direction = 'descending' }
+      )
+      page_size = 100
+    }
+
+    if ($cursor) {
+      $body.start_cursor = $cursor
+    }
+
+    $response = Invoke-DatabaseQuery $body
     if ($response.results) {
       $results += @($response.results)
     }
@@ -237,6 +270,7 @@ function Get-EditionLabel([string]$EditionValue) {
     'Morning'  { return 'Morning Edition' }
     'Evening'  { return 'Evening Edition' }
     'Breaking' { return 'Breaking News' }
+    'Breaking News' { return 'Breaking News' }
     default    { return $EditionValue }
   }
 }
@@ -541,6 +575,7 @@ code{font-family:'Courier New',monospace;font-size:.85rem;background:rgba(139,10
 
   <div class="footer fi d6">
     <div class="footer-txt">Printed by Order of the Ministry of Magic &nbsp;&middot;&nbsp; {{EDITION}} &nbsp;&middot;&nbsp; Issue {{ISSUE_ID}} &nbsp;&middot;&nbsp; {{DATE_DISPLAY}}</div>
+    <a href="{{ARCHIVE_HREF}}" style="font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.18em;color:var(--gold);text-decoration:none;">&mdash; The Archive &mdash;</a>
     <div class="footer-motto">"Owl-posted at dawn. Curated from your universe."</div>
   </div>
 </div>
@@ -574,9 +609,263 @@ function Render-NoIssuePage([string]$DateDisplay) {
     THE_MAP             = 'The newsroom is still gathering its morning dispatch.'
     TARGET_LANGUAGE     = '(not set)'
     TRANSLATED_BRIEFING = '(disabled for this issue)'
+    ARCHIVE_HREF        = 'issues/'
   }
 
   return Render-Template $slots
+}
+
+function Get-IssueArchiveFileName([string]$IssueId) {
+  $safeName = $IssueId
+  foreach ($invalid in [System.IO.Path]::GetInvalidFileNameChars()) {
+    $safeName = $safeName.Replace([string]$invalid, '-')
+  }
+  return $safeName + '.html'
+}
+
+function Get-IssueRenderData($Page, [string]$ArchiveHref) {
+  $props = $Page.properties
+  $blocks = @(Get-NotionChildren $Page.id)
+
+  $callouts = @($blocks | Where-Object { $_.type -eq 'callout' })
+  $dispatchCallout = $callouts[0]
+  $navCallout = $callouts[1]
+
+  $dispatchSubtitle = ''
+  if ($dispatchCallout.has_children) {
+    $dispatchSubtitle = Clean-Separator (((Get-NotionChildren $dispatchCallout.id) | ForEach-Object { Get-RecursiveBlockText $_ }) -join ' ')
+  }
+  if (-not $dispatchSubtitle) {
+    $dispatchSubtitle = Get-PlainFromRichText $dispatchCallout.callout.rich_text
+  }
+
+  $navStrip = Get-PlainFromRichText $navCallout.callout.rich_text
+  if (-not $navStrip) {
+    $navStrip = Get-RecursiveBlockText $navCallout
+  }
+
+  $headings = @($blocks | Where-Object { $_.type -eq 'heading_1' })
+  $frontHeading  = $headings[0]
+  $watchHeading  = $headings[1]
+  $potionHeading = $headings[2]
+  $spellsHeading = $headings[3]
+  $mapHeading    = $headings[4]
+
+  $frontIndex  = [array]::IndexOf($blocks, $frontHeading)
+  $watchIndex  = [array]::IndexOf($blocks, $watchHeading)
+  $potionIndex = [array]::IndexOf($blocks, $potionHeading)
+  $spellsIndex = [array]::IndexOf($blocks, $spellsHeading)
+  $mapIndex    = [array]::IndexOf($blocks, $mapHeading)
+
+  $leadBlock = $blocks[$frontIndex + 1]
+  $leadRecord = Split-RichTextRecord $leadBlock.quote.rich_text
+
+  $frontColumnList = $blocks[$frontIndex + 2]
+  $frontColumns = Get-ColumnChildren $frontColumnList.id
+
+  $romanNumerals = @('II.','III.','IV.','V.','VI.','VII.')
+  $romanIndex = 0
+
+  $leftHeadlineMarkup = @()
+  foreach ($item in @($frontColumns[0])) {
+    $leftHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
+    $romanIndex++
+  }
+
+  $rightHeadlineMarkup = @()
+  foreach ($item in @($frontColumns[1])) {
+    $rightHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
+    $romanIndex++
+  }
+
+  $watchColumnList = $blocks[$watchIndex + 1]
+  $watchColumns = Get-ColumnChildren $watchColumnList.id
+  $watchCards = @()
+  foreach ($column in @($watchColumns)) {
+    foreach ($callout in @($column)) {
+      $watchCards += Render-WatchCard $callout
+    }
+  }
+
+  $potionCallout = $blocks[$potionIndex + 1]
+  $potionText = Get-RecursiveBlockText $potionCallout
+  if (-not $potionText) {
+    $potionText = Get-PlainFromRichText $potionCallout.callout.rich_text
+  }
+  $potionMarkup = Render-PotionCard $potionText
+
+  $spellBlocks = @()
+  for ($i = $spellsIndex + 1; $i -lt $mapIndex; $i++) {
+    if ($blocks[$i].type -eq 'to_do') {
+      $spellBlocks += $blocks[$i]
+    }
+  }
+
+  $spellMarkup = @()
+  foreach ($spellBlock in $spellBlocks) {
+    $spellMarkup += Render-SpellItem $spellBlock
+  }
+
+  $mapBlock = $blocks[$mapIndex + 1]
+  $mapText = Get-PlainFromRichText $mapBlock.quote.rich_text
+
+  $editionRaw = Get-PropertyPlainText $props.Edition
+  $editionLabel = Get-EditionLabel $editionRaw
+  $issueId = Get-PropertyPlainText $props.'Issue ID'
+  $issueDate = Get-PropertyPlainText $props.Date
+  $dateDisplay = Get-DateDisplay $issueDate
+  $translationEnabled = $false
+  if ($props.PSObject.Properties.Name -contains 'Translation') {
+    $translationEnabled = [bool]$props.Translation.checkbox
+  }
+
+  $targetLanguage = ''
+  if ($props.PSObject.Properties.Name -contains 'Target language') {
+    $targetLanguage = Get-PropertyPlainText $props.'Target language'
+  }
+  if (-not $targetLanguage) {
+    $targetLanguage = '(not set)'
+  }
+
+  $translatedBriefing = '(disabled for this issue)'
+  if ($translationEnabled) {
+    if ($props.PSObject.Properties.Name -contains 'Translated briefing') {
+      $translatedBriefing = Get-PropertyPlainText $props.'Translated briefing'
+    }
+    if (-not $translatedBriefing) {
+      $translatedBriefing = '(not set)'
+    }
+  }
+
+  $slots = @{
+    DATE_DISPLAY        = HtmlEncode $dateDisplay
+    EDITION             = HtmlEncode $editionLabel
+    RIBBON_ICON         = Get-RibbonIcon $editionLabel
+    ISSUE_ID            = HtmlEncode $issueId
+    DISPATCH_SUBTITLE   = HtmlEncode $dispatchSubtitle
+    NAV_STRIP           = HtmlEncode $navStrip
+    LEAD_HEADLINE       = HtmlEncode $leadRecord.Headline
+    LEAD_SUMMARY        = HtmlEncode $leadRecord.Summary
+    LEAD_SOURCE         = HtmlEncode $leadRecord.Source
+    HEADLINES_COL_LEFT  = ($leftHeadlineMarkup -join "`n")
+    HEADLINES_COL_RIGHT = ($rightHeadlineMarkup -join "`n")
+    WATCHLIST_CARDS     = ($watchCards -join "`n")
+    POTION_NOTES        = $potionMarkup
+    SPELLS              = ($spellMarkup -join "`n")
+    THE_MAP             = HtmlEncode $mapText
+    TARGET_LANGUAGE     = HtmlEncode $targetLanguage
+    TRANSLATED_BRIEFING = HtmlEncode $translatedBriefing
+    ARCHIVE_HREF        = $ArchiveHref
+  }
+
+  return [pscustomobject]@{
+    Html      = Render-Template $slots
+    IssueId   = $issueId
+    IssueDate = $issueDate
+    Edition   = $editionLabel
+  }
+}
+
+function Get-ArchiveBadgeClass([string]$EditionLabel) {
+  switch ($EditionLabel) {
+    'Morning Edition' { return 'badge-morning' }
+    'Evening Edition' { return 'badge-evening' }
+    'Breaking News'   { return 'badge-breaking' }
+    default           { return 'badge-morning' }
+  }
+}
+
+function Render-ArchiveIndex($Pages) {
+  $rows = @()
+  foreach ($page in @($Pages)) {
+    $props = $page.properties
+    $issueId = Get-PropertyPlainText $props.'Issue ID'
+    if (-not $issueId) { continue }
+
+    $issueDate = Get-PropertyPlainText $props.Date
+    $editionLabel = Get-EditionLabel (Get-PropertyPlainText $props.Edition)
+    $badgeClass = Get-ArchiveBadgeClass $editionLabel
+    $fileName = Get-IssueArchiveFileName $issueId
+    $dateDisplay = Get-DateDisplay $issueDate
+
+    $rows += @"
+<div class="archive-row">
+  <div class="archive-date">$(HtmlEncode $dateDisplay)</div>
+  <div><span class="badge $badgeClass">$(HtmlEncode $editionLabel)</span></div>
+  <div class="archive-issue">$(HtmlEncode $issueId)</div>
+  <div><a class="archive-link" href="$(HtmlEncode $fileName)">issues/$(HtmlEncode $fileName)</a></div>
+</div>
+"@
+  }
+
+  $archiveRows = if ($rows.Count -gt 0) { $rows -join "`r`n" } else { '<div class="archive-empty">No archived issues yet.</div>' }
+
+  return @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Daily Prophet &mdash; Archive</title>
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Cinzel:wght@400;600;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{--p:#f2e8d0;--p2:#ecdfc5;--p3:#d9c9a0;--ink:#1a1208;--ink2:#3d2f1a;--ink3:#6b5535;--gold:#b8902a;--gold3:#e8cc7a;--rule:#8b6914;--red:#8b1a1a;--red2:#5c0f0f;--sh:rgba(26,18,8,.32);}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#18110a;min-height:100vh;padding:2rem 1rem 5rem;font-family:'IM Fell English',Georgia,serif;color:var(--ink);}
+.paper{max-width:920px;margin:0 auto;background:var(--p);background-image:linear-gradient(158deg,#f6eed9 0%,#f2e8d0 40%,#ecdfc5 75%,#e4d5b5 100%);box-shadow:0 0 0 1px var(--p3),0 6px 14px var(--sh),0 32px 90px rgba(0,0,0,.7);position:relative;overflow:hidden;}
+.paper::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(ellipse at 0% 0%,rgba(90,60,15,.13) 0%,transparent 36%),radial-gradient(ellipse at 100% 100%,rgba(90,60,15,.13) 0%,transparent 36%);}
+.masthead{padding:1.8rem 2.5rem 0;text-align:center;border-bottom:3px double var(--rule);position:relative;z-index:2;}
+.mh-bar{display:flex;align-items:center;gap:.8rem;margin-bottom:.55rem;}
+.mh-rule{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--rule),transparent);}
+.mh-eyebrow{font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.3em;color:var(--ink3);text-transform:uppercase;white-space:nowrap;}
+.mh-title{font-family:'UnifrakturMaguntia',cursive;font-size:clamp(3rem,9vw,6.2rem);color:var(--ink);line-height:.93;text-shadow:2px 2px 0 rgba(180,140,60,.15);margin-bottom:.22rem;}
+.mh-subtitle{font-family:'IM Fell English',serif;font-style:italic;font-size:.82rem;color:var(--ink3);letter-spacing:.07em;margin-bottom:.65rem;}
+.mh-meta{display:flex;justify-content:center;align-items:center;font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.1em;color:var(--ink2);padding:.42rem 0 .6rem;border-top:1px solid var(--p3);margin-top:.35rem;}
+.body{padding:1.4rem 2.5rem 2.5rem;position:relative;z-index:2;}
+.archive-head{font-family:'Cinzel',serif;font-size:.7rem;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--ink2);margin-bottom:.8rem;}
+.archive-list{border:1px solid var(--p3);background:rgba(255,255,255,.12);}
+.archive-row{display:grid;grid-template-columns:2.3fr 1.4fr 1.4fr 2.4fr;gap:.8rem;align-items:center;padding:.75rem 1rem;border-bottom:1px dotted rgba(139,105,20,.28);}
+.archive-row:last-child{border-bottom:none;}
+.archive-date,.archive-issue{font-size:.88rem;color:var(--ink2);}
+.archive-link{font-family:'IM Fell English SC',serif;font-size:.68rem;letter-spacing:.06em;color:var(--gold);text-decoration:none;}
+.archive-link:hover{text-decoration:underline;}
+.badge{display:inline-block;padding:.22rem .6rem;border:1px solid currentColor;font-family:'Cinzel',serif;font-size:.62rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;}
+.badge-morning{color:var(--gold);background:rgba(184,144,42,.08);}
+.badge-evening{color:#6b4ea0;background:rgba(107,78,160,.08);}
+.badge-breaking{color:var(--red);background:rgba(139,26,26,.08);}
+.archive-empty{padding:1rem;font-size:.9rem;color:var(--ink3);font-style:italic;}
+.footer{text-align:center;padding:1.1rem 2.5rem 1.7rem;border-top:3px double var(--rule);}
+.footer-txt{font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.18em;color:var(--ink3);}
+.footer-link{display:inline-block;margin-top:.45rem;font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.18em;color:var(--gold);text-decoration:none;}
+@media(max-width:700px){.masthead,.body,.footer{padding-left:1.4rem;padding-right:1.4rem;}.archive-row{grid-template-columns:1fr;gap:.35rem;}}
+</style>
+</head>
+<body>
+<div class="paper">
+  <div class="masthead">
+    <div class="mh-bar">
+      <div class="mh-rule"></div>
+      <div class="mh-eyebrow">Curated from your universe &middot; Est. by order of the Ministry</div>
+      <div class="mh-rule"></div>
+    </div>
+    <div class="mh-title">The Daily Prophet &mdash; Archive</div>
+    <div class="mh-subtitle">Past owl-posted editions from the Daily Prophet Issues desk</div>
+    <div class="mh-meta">Collected from DB | Daily Prophet Issues</div>
+  </div>
+  <div class="body">
+    <div class="archive-head">Issue Ledger</div>
+    <div class="archive-list">
+$archiveRows
+    </div>
+  </div>
+  <div class="footer">
+    <div class="footer-txt">Printed by Order of the Ministry of Magic &nbsp;&middot;&nbsp; Archive Ledger</div>
+    <a class="footer-link" href="../">Return to Today&apos;s Issue</a>
+  </div>
+</div>
+</body>
+</html>
+"@
 }
 
 $issueDate = Get-IssueDate
@@ -591,148 +880,41 @@ $queryBody = @{
   }
 }
 
-$queryUri = "https://api.notion.com/v1/databases/$DatabaseId/query"
-$queryResponse = Invoke-NotionJson -Method Post -Uri $queryUri -Body $queryBody
+$queryResponse = Invoke-DatabaseQuery $queryBody
+$allIssuePages = Get-AllIssuePages
+
+if (-not (Test-Path -LiteralPath $IssuesDirectory)) {
+  New-Item -ItemType Directory -Path $IssuesDirectory | Out-Null
+}
 
 if (-not $queryResponse.results -or $queryResponse.results.Count -eq 0) {
   $html = Render-NoIssuePage $dateDisplay
   Write-Utf8File -Path $OutputPath -Content $html
+  Write-Utf8File -Path $ArchiveIndexPath -Content (Render-ArchiveIndex $allIssuePages)
   Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $EmDash + ' ' + $EmDash + ' ' + $issueDate)
   exit 0
 }
 
-$page = $queryResponse.results[0]
-$props = $page.properties
-$blocks = @(Get-NotionChildren $page.id)
+$currentPage = $queryResponse.results[0]
+$currentRender = Get-IssueRenderData -Page $currentPage -ArchiveHref 'issues/'
+Write-Utf8File -Path $OutputPath -Content $currentRender.Html
 
-$callouts = @($blocks | Where-Object { $_.type -eq 'callout' })
-$dispatchCallout = $callouts[0]
-$navCallout = $callouts[1]
+$archiveCount = 0
+foreach ($issuePage in @($allIssuePages)) {
+  $issueId = Get-PropertyPlainText $issuePage.properties.'Issue ID'
+  if (-not $issueId) { continue }
 
-$dispatchSubtitle = ''
-if ($dispatchCallout.has_children) {
-  $dispatchSubtitle = Clean-Separator (((Get-NotionChildren $dispatchCallout.id) | ForEach-Object { Get-RecursiveBlockText $_ }) -join ' ')
-}
-if (-not $dispatchSubtitle) {
-  $dispatchSubtitle = Get-PlainFromRichText $dispatchCallout.callout.rich_text
-}
-
-$navStrip = Get-PlainFromRichText $navCallout.callout.rich_text
-if (-not $navStrip) {
-  $navStrip = Get-RecursiveBlockText $navCallout
-}
-
-$headings = @($blocks | Where-Object { $_.type -eq 'heading_1' })
-$frontHeading  = $headings[0]
-$watchHeading  = $headings[1]
-$potionHeading = $headings[2]
-$spellsHeading = $headings[3]
-$mapHeading    = $headings[4]
-
-$frontIndex  = [array]::IndexOf($blocks, $frontHeading)
-$watchIndex  = [array]::IndexOf($blocks, $watchHeading)
-$potionIndex = [array]::IndexOf($blocks, $potionHeading)
-$spellsIndex = [array]::IndexOf($blocks, $spellsHeading)
-$mapIndex    = [array]::IndexOf($blocks, $mapHeading)
-
-$leadBlock = $blocks[$frontIndex + 1]
-$leadRecord = Split-RichTextRecord $leadBlock.quote.rich_text
-
-$frontColumnList = $blocks[$frontIndex + 2]
-$frontColumns = Get-ColumnChildren $frontColumnList.id
-
-$romanNumerals = @('II.','III.','IV.','V.','VI.','VII.')
-$romanIndex = 0
-
-$leftHeadlineMarkup = @()
-foreach ($item in @($frontColumns[0])) {
-  $leftHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
-  $romanIndex++
-}
-
-$rightHeadlineMarkup = @()
-foreach ($item in @($frontColumns[1])) {
-  $rightHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
-  $romanIndex++
-}
-
-$watchColumnList = $blocks[$watchIndex + 1]
-$watchColumns = Get-ColumnChildren $watchColumnList.id
-$watchCards = @()
-foreach ($column in @($watchColumns)) {
-  foreach ($callout in @($column)) {
-    $watchCards += Render-WatchCard $callout
+  $renderedIssue = if ($issuePage.id -eq $currentPage.id) {
+    Get-IssueRenderData -Page $issuePage -ArchiveHref './'
+  } else {
+    Get-IssueRenderData -Page $issuePage -ArchiveHref './'
   }
+
+  $archivePath = Join-Path $IssuesDirectory (Get-IssueArchiveFileName $renderedIssue.IssueId)
+  Write-Utf8File -Path $archivePath -Content $renderedIssue.Html
+  $archiveCount++
 }
 
-$potionCallout = $blocks[$potionIndex + 1]
-$potionText = Get-RecursiveBlockText $potionCallout
-if (-not $potionText) {
-  $potionText = Get-PlainFromRichText $potionCallout.callout.rich_text
-}
-$potionMarkup = Render-PotionCard $potionText
-
-$spellBlocks = @()
-for ($i = $spellsIndex + 1; $i -lt $mapIndex; $i++) {
-  if ($blocks[$i].type -eq 'to_do') {
-    $spellBlocks += $blocks[$i]
-  }
-}
-
-$spellMarkup = @()
-foreach ($spellBlock in $spellBlocks) {
-  $spellMarkup += Render-SpellItem $spellBlock
-}
-
-$mapBlock = $blocks[$mapIndex + 1]
-$mapText = Get-PlainFromRichText $mapBlock.quote.rich_text
-
-$editionRaw = Get-PropertyPlainText $props.Edition
-$editionLabel = Get-EditionLabel $editionRaw
-$issueId = Get-PropertyPlainText $props.'Issue ID'
-$translationEnabled = $false
-if ($props.PSObject.Properties.Name -contains 'Translation') {
-  $translationEnabled = [bool]$props.Translation.checkbox
-}
-
-$targetLanguage = ''
-if ($props.PSObject.Properties.Name -contains 'Target language') {
-  $targetLanguage = Get-PropertyPlainText $props.'Target language'
-}
-if (-not $targetLanguage) {
-  $targetLanguage = '(not set)'
-}
-
-$translatedBriefing = '(disabled for this issue)'
-if ($translationEnabled) {
-  if ($props.PSObject.Properties.Name -contains 'Translated briefing') {
-    $translatedBriefing = Get-PropertyPlainText $props.'Translated briefing'
-  }
-  if (-not $translatedBriefing) {
-    $translatedBriefing = '(not set)'
-  }
-}
-
-$slots = @{
-  DATE_DISPLAY        = HtmlEncode $dateDisplay
-  EDITION             = HtmlEncode $editionLabel
-  RIBBON_ICON         = Get-RibbonIcon $editionLabel
-  ISSUE_ID            = HtmlEncode $issueId
-  DISPATCH_SUBTITLE   = HtmlEncode $dispatchSubtitle
-  NAV_STRIP           = HtmlEncode $navStrip
-  LEAD_HEADLINE       = HtmlEncode $leadRecord.Headline
-  LEAD_SUMMARY        = HtmlEncode $leadRecord.Summary
-  LEAD_SOURCE         = HtmlEncode $leadRecord.Source
-  HEADLINES_COL_LEFT  = ($leftHeadlineMarkup -join "`n")
-  HEADLINES_COL_RIGHT = ($rightHeadlineMarkup -join "`n")
-  WATCHLIST_CARDS     = ($watchCards -join "`n")
-  POTION_NOTES        = $potionMarkup
-  SPELLS              = ($spellMarkup -join "`n")
-  THE_MAP             = HtmlEncode $mapText
-  TARGET_LANGUAGE     = HtmlEncode $targetLanguage
-  TRANSLATED_BRIEFING = HtmlEncode $translatedBriefing
-}
-
-$html = Render-Template $slots
-Write-Utf8File -Path $OutputPath -Content $html
-Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $issueId + ' ' + $EmDash + ' ' + $issueDate)
+Write-Utf8File -Path $ArchiveIndexPath -Content (Render-ArchiveIndex $allIssuePages)
+Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $currentRender.IssueId + ' ' + $EmDash + ' ' + $issueDate)
+Write-Host ('Archived: ' + $archiveCount + ' issues')
