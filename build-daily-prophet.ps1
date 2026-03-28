@@ -5,23 +5,37 @@ $ErrorActionPreference = 'Stop'
 
 $DatabaseId = '331255fc8f4480d59f92ffb703398031'
 $OutputPath = Join-Path $PSScriptRoot 'index.html'
+$EmDash = [string][char]0x2014
+$EnDash = [string][char]0x2013
+$DashPattern = '\s*(' + [regex]::Escape($EmDash) + '|' + [regex]::Escape($EnDash) + '|-)\s*'
 
 function Get-EnvValue([string]$Name) {
   $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
-  if ($processValue) { return $processValue }
-  return [Environment]::GetEnvironmentVariable($Name, 'User')
+  if (-not [string]::IsNullOrWhiteSpace($processValue)) { return $processValue }
+
+  $userValue = [Environment]::GetEnvironmentVariable($Name, 'User')
+  if (-not [string]::IsNullOrWhiteSpace($userValue)) { return $userValue }
+
+  return $null
 }
 
 function Get-IssueDate() {
   $override = Get-EnvValue 'ISSUE_DATE'
   if ($override) { return $override }
-  return [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), 'Eastern Standard Time').ToString('yyyy-MM-dd')
+
+  $utcNow = (Get-Date).ToUniversalTime()
+  $eastern = [System.TimeZoneInfo]::FindSystemTimeZoneById('Eastern Standard Time')
+  return [System.TimeZoneInfo]::ConvertTimeFromUtc($utcNow, $eastern).ToString('yyyy-MM-dd')
+}
+
+function Get-DateDisplay([string]$IssueDate) {
+  return [datetime]::ParseExact($IssueDate, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture).ToString('dddd, d MMMM yyyy')
 }
 
 function Get-NotionHeaders() {
   $token = Get-EnvValue 'NOTION_API_KEY'
   if (-not $token) {
-    throw 'NOTION_API_KEY is missing from both the current process and User environment variables.'
+    throw 'NOTION_API_KEY is missing.'
   }
 
   return @{
@@ -39,14 +53,14 @@ function Invoke-NotionJson([string]$Method, [string]$Uri, $Body = $null) {
   }
 
   if ($null -ne $Body) {
-    $params.Body = ($Body | ConvertTo-Json -Depth 20)
+    $params.Body = ($Body | ConvertTo-Json -Depth 30)
   }
 
   return Invoke-RestMethod @params
 }
 
 function Get-NotionChildren([string]$BlockId) {
-  $items = @()
+  $results = @()
   $cursor = $null
 
   do {
@@ -55,91 +69,14 @@ function Get-NotionChildren([string]$BlockId) {
       $uri += "&start_cursor=$cursor"
     }
 
-    $resp = Invoke-NotionJson -Method Get -Uri $uri
-    $items += $resp.results
-    $cursor = $resp.next_cursor
+    $response = Invoke-NotionJson -Method Get -Uri $uri
+    if ($response.results) {
+      $results += @($response.results)
+    }
+    $cursor = $response.next_cursor
   } while ($cursor)
 
-  return $items
-}
-
-function Get-PropertyPlainText($Prop) {
-  if (-not $Prop) { return '' }
-  switch ($Prop.type) {
-    'title'      { return (($Prop.title | ForEach-Object plain_text) -join '') }
-    'rich_text'  { return (($Prop.rich_text | ForEach-Object plain_text) -join '') }
-    'select'     { return $Prop.select.name }
-    'multi_select' { return (($Prop.multi_select | ForEach-Object name) -join ', ') }
-    'date'       { return $Prop.date.start }
-    'checkbox'   { return [string]$Prop.checkbox }
-    default      { return '' }
-  }
-}
-
-function Get-RichTextPlain($RichText) {
-  if (-not $RichText) { return '' }
-
-  $parts = foreach ($item in $RichText) {
-    if ($item.type -eq 'mention' -and $item.mention.type -eq 'page' -and $item.plain_text -eq 'Untitled') {
-      continue
-    }
-    $item.plain_text
-  }
-
-  $text = ($parts -join '')
-  $text = $text -replace '\s*[\p{Pd}]\s*Untitled\b', ''
-  $text = $text -replace '\s{2,}', ' '
-  $text = $text.Trim()
-  $text = $text -replace '\s*[\p{Pd}]+\s*$', ''
-  return $text.Trim()
-}
-
-function Get-BlockText($Block) {
-  $payload = $Block.$($Block.type)
-  if (-not $payload) { return '' }
-  if ($payload.PSObject.Properties.Name -contains 'rich_text') {
-    return Get-RichTextPlain $payload.rich_text
-  }
-  return ''
-}
-
-function Split-Headline([string]$Text) {
-  $parts = [regex]::Split($Text, '\s*[\p{Pd}]\s*', 3)
-  $headline = if ($parts.Count -gt 0) { $parts[0].Trim() } else { $Text.Trim() }
-  $deck = if ($parts.Count -gt 1) { $parts[1].Trim() } else { '' }
-  return @{
-    Headline = $headline
-    Deck     = $deck
-  }
-}
-
-function Get-ColumnBlocks([string]$ColumnListId) {
-  $columns = @()
-  foreach ($column in (Get-NotionChildren $ColumnListId)) {
-    $columns += ,(Get-NotionChildren $column.id)
-  }
-  return $columns
-}
-
-function Get-WatchlistItem([object]$Callout) {
-  $payload = $Callout.callout
-  $title = Get-RichTextPlain $payload.rich_text
-  $bodyBlocks = @(Get-NotionChildren $Callout.id)
-  $body = (($bodyBlocks | ForEach-Object { Get-BlockText $_ }) -join ' ').Trim()
-  $color = switch ($payload.color) {
-    'purple_background' { 'purple' }
-    'green_background'  { 'green' }
-    'brown_background'  { 'brown' }
-    'gray_background'   { 'gray' }
-    default             { 'gray' }
-  }
-
-  return @{
-    Title = $title
-    Body  = $body
-    Icon  = $payload.icon.emoji
-    Tone  = $color
-  }
+  return @($results)
 }
 
 function HtmlEncode([string]$Text) {
@@ -147,238 +84,503 @@ function HtmlEncode([string]$Text) {
   return [System.Net.WebUtility]::HtmlEncode($Text)
 }
 
-function Render-FrontPage($FrontLead, $FrontColumns) {
-  $items = foreach ($column in $FrontColumns) {
-    foreach ($item in $column) {
-      $parsed = Split-Headline (Get-BlockText $item)
-      @"
-<article class="story">
-  <h3>$(HtmlEncode $parsed.Headline)</h3>
-  <p>$(HtmlEncode $parsed.Deck)</p>
-</article>
-"@
+function Write-Utf8File([string]$Path, [string]$Content) {
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+}
+
+$MentionCache = @{}
+
+function Get-MentionTitle([string]$PageId) {
+  if ([string]::IsNullOrWhiteSpace($PageId)) { return '' }
+  if ($MentionCache.ContainsKey($PageId)) { return $MentionCache[$PageId] }
+
+  try {
+    $page = Invoke-NotionJson -Method Get -Uri "https://api.notion.com/v1/pages/$($PageId -replace '-','')"
+    $titleProperty = $page.properties.PSObject.Properties | Where-Object { $_.Value.type -eq 'title' } | Select-Object -First 1
+    $title = ''
+    if ($titleProperty) {
+      $title = (($titleProperty.Value.title | ForEach-Object { $_.plain_text }) -join '')
+    }
+    $MentionCache[$PageId] = $title
+    return $title
+  } catch {
+    $MentionCache[$PageId] = ''
+    return ''
+  }
+}
+
+function Get-RichSegments($RichText) {
+  $segments = @()
+
+  foreach ($item in @($RichText)) {
+    if ($item.type -eq 'mention' -and $item.mention.type -eq 'page') {
+      $title = Get-MentionTitle $item.mention.page.id
+      if ($title) {
+        $segments += [pscustomobject]@{
+          Text      = $title
+          Bold      = $false
+          IsMention = $true
+        }
+      }
+      continue
+    }
+
+    $segments += [pscustomobject]@{
+      Text      = $item.plain_text
+      Bold      = [bool]$item.annotations.bold
+      IsMention = $false
     }
   }
 
-  return @"
-<section class="section">
-  <div class="section-kicker">Front Page</div>
-  <blockquote class="lead-quote">$(HtmlEncode $FrontLead)</blockquote>
-  <div class="columns two">
-$(($items -join "`n"))
-  </div>
-</section>
-"@
+  return @($segments)
 }
 
-function Render-Watchlist($Items) {
-  $cards = foreach ($item in $Items) {
-    @"
-<article class="watch-card tone-$($item.Tone)">
-  <div class="watch-icon">$(HtmlEncode $item.Icon)</div>
-  <h3>$(HtmlEncode $item.Title)</h3>
-  <p>$(HtmlEncode $item.Body)</p>
-</article>
-"@
+function Clean-Separator([string]$Text) {
+  if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+
+  $cleaned = $Text
+  $cleaned = $cleaned -replace ('\s*(' + [regex]::Escape($EmDash) + '|' + [regex]::Escape($EnDash) + '|-)+\s*$'), ''
+  $cleaned = $cleaned -replace ('^\s*(' + [regex]::Escape($EmDash) + '|' + [regex]::Escape($EnDash) + '|-)+\s*'), ''
+  $cleaned = $cleaned -replace '\s{2,}', ' '
+  return $cleaned.Trim()
+}
+
+function Join-Segments($Segments, [scriptblock]$Filter) {
+  $parts = foreach ($segment in @($Segments)) {
+    if (& $Filter $segment) {
+      $segment.Text
+    }
   }
 
-  return @"
-<section class="section">
-  <div class="section-kicker">Hogwarts Watchlist</div>
-  <div class="columns two">
-$(($cards -join "`n"))
-  </div>
-</section>
-"@
+  return Clean-Separator (($parts -join '').Trim())
 }
 
-function Render-Spells($Todos) {
-  $items = foreach ($todo in $Todos) {
-    $text = Get-BlockText $todo
-    $checked = if ($todo.to_do.checked) { 'checked' } else { '' }
-    @"
-<label class="spell">
-  <input type="checkbox" disabled $checked>
-  <span>$(HtmlEncode $text)</span>
-</label>
-"@
+function Get-PlainFromRichText($RichText) {
+  $segments = Get-RichSegments $RichText
+  return Clean-Separator (($segments | ForEach-Object { $_.Text }) -join '')
+}
+
+function Get-BlockPlainText($Block) {
+  if (-not $Block) { return '' }
+
+  $payload = $Block.$($Block.type)
+  if (-not $payload) { return '' }
+
+  if ($payload.PSObject.Properties.Name -contains 'rich_text') {
+    return Get-PlainFromRichText $payload.rich_text
   }
 
-  return @"
-<section class="section">
-  <div class="section-kicker">Today's Spells</div>
-  <div class="spells">
-$(($items -join "`n"))
+  return ''
+}
+
+function Get-RecursiveBlockText($Block) {
+  $parts = @()
+
+  $ownText = Get-BlockPlainText $Block
+  if ($ownText) {
+    $parts += $ownText
+  }
+
+  if ($Block.has_children) {
+    foreach ($child in (Get-NotionChildren $Block.id)) {
+      $childText = Get-RecursiveBlockText $child
+      if ($childText) {
+        $parts += $childText
+      }
+    }
+  }
+
+  return Clean-Separator (($parts -join ' ').Trim())
+}
+
+function Split-RichTextRecord($RichText) {
+  $segments = Get-RichSegments $RichText
+  $headline = Join-Segments $segments { param($s) $s.Bold -and -not $s.IsMention }
+  $summary  = Join-Segments $segments { param($s) (-not $s.Bold) -and (-not $s.IsMention) }
+  $source   = Join-Segments $segments { param($s) $s.IsMention }
+
+  if (-not $headline) {
+    $fullText = Clean-Separator (($segments | ForEach-Object { $_.Text }) -join '')
+    $parts = [regex]::Split($fullText, $DashPattern, 2)
+    $headline = if ($parts.Count -ge 1) { $parts[0].Trim() } else { $fullText }
+    $summary = if ($parts.Count -ge 2) { Clean-Separator $parts[1] } else { '' }
+  }
+
+  return [pscustomobject]@{
+    Headline = $headline
+    Summary  = $summary
+    Source   = $source
+  }
+}
+
+function Get-ColumnChildren([string]$ColumnListId) {
+  $columns = @()
+  foreach ($column in (Get-NotionChildren $ColumnListId)) {
+    $columns += ,@(Get-NotionChildren $column.id)
+  }
+  return @($columns)
+}
+
+function Get-RibbonIcon([string]$EditionLabel) {
+  switch ($EditionLabel) {
+    'Morning Edition' { return '&#9728;' }
+    'Evening Edition' { return '&#127769;' }
+    'Breaking News'   { return '&#9889;' }
+    default           { return '&#9728;' }
+  }
+}
+
+function Get-EditionLabel([string]$EditionValue) {
+  switch ($EditionValue) {
+    'Morning'  { return 'Morning Edition' }
+    'Evening'  { return 'Evening Edition' }
+    'Breaking' { return 'Breaking News' }
+    default    { return $EditionValue }
+  }
+}
+
+function Get-PropertyPlainText($Property) {
+  if (-not $Property) { return '' }
+
+  switch ($Property.type) {
+    'title'     { return (($Property.title | ForEach-Object { $_.plain_text }) -join '') }
+    'rich_text' { return (($Property.rich_text | ForEach-Object { $_.plain_text }) -join '') }
+    'select'    { return $Property.select.name }
+    'date'      { return $Property.date.start }
+    'checkbox'  { return [string]$Property.checkbox }
+    default     { return '' }
+  }
+}
+
+function Get-WatchCssClass([string]$Color) {
+  switch ($Color) {
+    'purple_background' { return 'wc-purple' }
+    'green_background'  { return 'wc-green' }
+    'brown_background'  { return 'wc-brown' }
+    'gray_background'   { return 'wc-gray' }
+    default             { return 'wc-gray' }
+  }
+}
+
+function Get-WatchBodyModifier([string]$Text) {
+  $lower = $Text.ToLowerInvariant()
+  if ($lower.Contains('no fresh signal') -or $lower.Contains('no new updates')) {
+    return ' dim'
+  }
+  return ''
+}
+
+function Render-HeadlineItem([string]$Roman, $Record) {
+  $sourceMarkup = ''
+  if ($Record.Source) {
+    $sourceMarkup = '    <span class="src">' + (HtmlEncode $Record.Source) + '</span>'
+  }
+
+@"
+<div class="hl-item">
+  <div class="hl-n">$Roman</div>
+  <div>
+    <div class="hl-h">$(HtmlEncode $Record.Headline)</div>
+    <div class="hl-s">$(HtmlEncode $Record.Summary)</div>
+$sourceMarkup
   </div>
-</section>
+</div>
 "@
 }
 
-function Render-Page($Data) {
-  $dateDisplay = [datetime]::Parse($Data.Date).ToString('dddd, MMMM d, yyyy')
-  $sourcesHtml = if ($Data.Sources) { HtmlEncode $Data.Sources } else { 'Notion' }
+function Render-WatchCard($Callout) {
+  $title = Get-PlainFromRichText $Callout.callout.rich_text
+  $body = ''
+  if ($Callout.has_children) {
+    $body = Clean-Separator (((Get-NotionChildren $Callout.id) | ForEach-Object { Get-RecursiveBlockText $_ }) -join ' ')
+  }
+  if (-not $body) {
+    $body = Get-RecursiveBlockText $Callout
+  }
+  if (-not $body) { $body = 'No fresh signal' }
+  if ($title -and $body.StartsWith($title + ' ')) {
+    $body = $body.Substring($title.Length).Trim()
+  }
 
-  return @"
+  $cssClass = Get-WatchCssClass $Callout.callout.color
+  $bodyClass = 'wc-body' + (Get-WatchBodyModifier $body)
+  $icon = ''
+  if ($Callout.callout.icon.type -eq 'emoji') {
+    $icon = $Callout.callout.icon.emoji
+  }
+
+@"
+<div class="watch-card $cssClass">
+  <div class="wc-name"><span style="margin-right:.3rem">$(HtmlEncode $icon)</span>$(HtmlEncode $title)</div>
+  <div class="$bodyClass">$(HtmlEncode $body)</div>
+</div>
+"@
+}
+
+function Render-PotionCard([string]$Text) {
+@"
+<div class="potion-card">
+  <div class="potion-ico">&#x1F9EA;</div>
+  <div class="potion-text">$(HtmlEncode $Text)</div>
+</div>
+"@
+}
+
+function Render-SpellItem($Block) {
+  $record = Split-RichTextRecord $Block.to_do.rich_text
+  $textParts = @()
+  if ($record.Headline) { $textParts += $record.Headline }
+  if ($record.Summary) { $textParts += $record.Summary }
+  $spellText = Clean-Separator ($textParts -join (' ' + $EmDash + ' '))
+
+  $sourceMarkup = ''
+  if ($record.Source) {
+    $sourceMarkup = ' <span class="src">' + (HtmlEncode $record.Source) + '</span>'
+  }
+
+@"
+<li class="spell">
+  <div class="spell-box"></div>
+  <div class="spell-txt">$(HtmlEncode $spellText)$sourceMarkup</div>
+</li>
+"@
+}
+
+function Render-Template($Slots) {
+  $template = @'
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Daily Prophet — $(HtmlEncode $dateDisplay) · $(HtmlEncode $Data.Edition)</title>
+<title>The Daily Prophet &mdash; {{DATE_DISPLAY}} &middot; {{EDITION}}</title>
 <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Cinzel:wght@400;600;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <style>
-:root {
-  --p:#f2e8d0;--p2:#ecdfc5;--p3:#d9c9a0;
-  --ink:#1a1208;--ink2:#3d2f1a;--ink3:#6b5535;
-  --gold:#b8902a;--gold3:#e8cc7a;--rule:#8b6914;
-  --red:#8b1a1a;--red2:#5c0f0f;--sh:rgba(26,18,8,.32);
-}
+:root{--p:#f2e8d0;--p2:#ecdfc5;--p3:#d9c9a0;--ink:#1a1208;--ink2:#3d2f1a;--ink3:#6b5535;--gold:#b8902a;--gold3:#e8cc7a;--rule:#8b6914;--red:#8b1a1a;--red2:#5c0f0f;--sh:rgba(26,18,8,.32);}
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:#18110a;min-height:100vh;padding:2rem 1rem 5rem;font-family:'IM Fell English',Georgia,serif;color:var(--ink);}
 .mote{position:fixed;width:2px;height:2px;border-radius:50%;background:var(--gold3);opacity:0;pointer-events:none;animation:mote-rise linear infinite;}
 @keyframes mote-rise{0%{transform:translateY(105vh) translateX(0);opacity:0}8%{opacity:.45}92%{opacity:.12}100%{transform:translateY(-30px) translateX(var(--dx,25px));opacity:0}}
-.paper{max-width:920px;margin:0 auto;background:var(--p);background-image:linear-gradient(158deg,#f6eed9 0%,#f2e8d0 40%,#ecdfc5 75%,#e4d5b5 100%);box-shadow:0 0 0 1px var(--p3),0 22px 60px var(--sh);position:relative;overflow:hidden}
-.paper::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at top left,rgba(255,255,255,.18),transparent 32%),radial-gradient(circle at bottom right,rgba(139,105,20,.08),transparent 30%);pointer-events:none}
-.paper-inner{padding:1.5rem 1.2rem 2rem;position:relative}
-.nameplate{border-top:3px double var(--rule);border-bottom:3px double var(--rule);padding:1rem 0 .85rem;text-align:center}
-.kicker{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink3);margin-bottom:.35rem}
-.flag{font-family:'UnifrakturMaguntia',serif;font-size:clamp(2.8rem,8vw,5.2rem);line-height:1;color:var(--ink)}
-.sub{font-family:'IM Fell English SC',serif;font-size:.9rem;letter-spacing:.08em;color:var(--ink2);margin-top:.45rem}
-.meta{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;border-bottom:1px solid var(--rule);padding:.7rem 0 .8rem;margin-bottom:1rem;font-family:'Cinzel',serif;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
-.summary{font-family:'Playfair Display',serif;font-size:1.08rem;line-height:1.65;color:var(--ink2);padding:.35rem 0 1rem;border-bottom:1px solid rgba(139,105,20,.35)}
-.summary strong{font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:var(--red);margin-right:.55rem}
-.section{padding:1.15rem 0;border-bottom:1px solid rgba(139,105,20,.35)}
-.section:last-of-type{border-bottom:none}
-.section-kicker{font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.18em;text-transform:uppercase;color:var(--red);margin-bottom:.7rem}
-.lead-quote{font-family:'Playfair Display',serif;font-size:1.45rem;line-height:1.35;border-left:4px solid var(--rule);padding:.2rem 0 .2rem .9rem;margin-bottom:1rem}
-.columns{display:grid;gap:1rem}
-.columns.two{grid-template-columns:repeat(2,minmax(0,1fr))}
-.story{background:rgba(255,255,255,.24);border:1px solid rgba(139,105,20,.28);padding:.9rem .95rem}
-.story h3{font-family:'Playfair Display',serif;font-size:1.15rem;line-height:1.2;margin-bottom:.35rem}
-.story p{line-height:1.55;color:var(--ink2)}
-.watch-card{border:1px solid rgba(139,105,20,.28);padding:.95rem;background:rgba(255,255,255,.18)}
-.watch-card h3{font-family:'Cinzel',serif;font-size:1rem;letter-spacing:.06em;text-transform:uppercase;margin-bottom:.35rem}
-.watch-card p{line-height:1.55;color:var(--ink2)}
-.watch-icon{font-size:1.1rem;margin-bottom:.4rem}
-.tone-purple{box-shadow:inset 0 0 0 2px rgba(92,15,15,.04);background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(107,85,53,.06))}
-.tone-green{background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(184,144,42,.08))}
-.tone-brown{background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(61,47,26,.08))}
-.tone-gray{background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(107,85,53,.05))}
-.note-box{background:rgba(255,255,255,.26);border:1px solid rgba(139,105,20,.28);padding:1rem 1rem 1.05rem;font-size:1.06rem;line-height:1.7}
-.spells{display:grid;gap:.7rem}
-.spell{display:grid;grid-template-columns:20px 1fr;gap:.7rem;align-items:start;padding:.8rem .85rem;border:1px solid rgba(139,105,20,.28);background:rgba(255,255,255,.18)}
-.spell input{margin-top:.18rem;accent-color:var(--rule)}
-.map-quote{font-style:italic;font-size:1.15rem;line-height:1.7;padding:.2rem 0}
-.footer{border-top:3px double var(--rule);margin-top:1rem;padding-top:.9rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;font-family:'Cinzel',serif;font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
-@media (max-width:700px){.columns.two{grid-template-columns:1fr}.meta,.footer{flex-direction:column}.paper-inner{padding:1rem}.lead-quote{font-size:1.2rem}}
+.paper{max-width:920px;margin:0 auto;background:var(--p);background-image:linear-gradient(158deg,#f6eed9 0%,#f2e8d0 40%,#ecdfc5 75%,#e4d5b5 100%);box-shadow:0 0 0 1px var(--p3),0 6px 14px var(--sh),0 32px 90px rgba(0,0,0,.7);position:relative;overflow:hidden;animation:paper-unfurl .65s cubic-bezier(.2,.8,.3,1) both;}
+@keyframes paper-unfurl{from{opacity:0;transform:translateY(14px) scale(.987)}to{opacity:1;transform:translateY(0) scale(1)}}
+.paper::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(ellipse at 0% 0%,rgba(90,60,15,.13) 0%,transparent 36%),radial-gradient(ellipse at 100% 100%,rgba(90,60,15,.13) 0%,transparent 36%);}
+.masthead{padding:1.8rem 2.5rem 0;text-align:center;border-bottom:3px double var(--rule);position:relative;z-index:2;}
+.mh-bar{display:flex;align-items:center;gap:.8rem;margin-bottom:.55rem;}
+.mh-rule{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--rule),transparent);}
+.mh-eyebrow{font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.3em;color:var(--ink3);text-transform:uppercase;white-space:nowrap;}
+.mh-title{font-family:'UnifrakturMaguntia',cursive;font-size:clamp(3rem,9vw,6.2rem);color:var(--ink);line-height:.93;text-shadow:2px 2px 0 rgba(180,140,60,.15);margin-bottom:.22rem;}
+.mh-subtitle{font-family:'IM Fell English',serif;font-style:italic;font-size:.82rem;color:var(--ink3);letter-spacing:.07em;margin-bottom:.65rem;}
+.mh-meta{display:flex;justify-content:space-between;align-items:center;font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.1em;color:var(--ink2);padding:.42rem 0 .6rem;border-top:1px solid var(--p3);margin-top:.35rem;}
+.seal{width:38px;height:38px;border-radius:50%;background:var(--red);border:2px solid var(--red2);display:flex;align-items:center;justify-content:center;font-size:1.25rem;flex-shrink:0;box-shadow:0 0 0 3px var(--p),0 0 0 4px var(--red2);animation:seal-pulse 4s ease-in-out infinite;}
+@keyframes seal-pulse{0%,100%{box-shadow:0 0 0 3px var(--p),0 0 0 4px var(--red2)}50%{box-shadow:0 0 0 3px var(--p),0 0 0 4px var(--red2),0 0 16px rgba(139,26,26,.45)}}
+.ribbon{background:var(--ink);color:var(--gold3);font-family:'Cinzel',serif;font-size:.66rem;font-weight:600;letter-spacing:.28em;text-transform:uppercase;text-align:center;padding:.33rem 1rem;}
+.body{padding:0 2.5rem 2.5rem;position:relative;z-index:2;}
+.dispatch{margin:1.3rem 0 0;background:linear-gradient(135deg,rgba(184,144,42,.07),rgba(184,144,42,.03));border:1px solid var(--p3);border-left:4px solid var(--gold);padding:.9rem 1.2rem .85rem 3rem;position:relative;}
+.dispatch-owl{position:absolute;left:.65rem;top:50%;transform:translateY(-50%);font-size:1.7rem;animation:owl-bob 3.5s ease-in-out infinite;}
+@keyframes owl-bob{0%,100%{transform:translateY(-50%) rotate(-4deg)}50%{transform:translateY(calc(-50% - 5px)) rotate(4deg)}}
+.dispatch-head{font-family:'Cinzel',serif;font-size:.7rem;font-weight:600;letter-spacing:.22em;color:var(--ink);text-transform:uppercase;margin-bottom:.15rem;}
+.dispatch-sub{font-style:italic;font-size:.8rem;color:var(--ink3);}
+.nav-strip{background:rgba(139,105,20,.08);border:1px solid var(--p3);border-top:none;padding:.38rem 1.2rem;font-family:'IM Fell English SC',serif;font-size:.63rem;letter-spacing:.1em;color:var(--ink3);text-align:center;margin-bottom:1rem;}
+.sec{display:flex;align-items:center;gap:.65rem;margin:1.5rem 0 .7rem;}
+.sec-rl{flex:0 0 16px;height:2px;background:var(--rule);}
+.sec-rr{flex:1;height:1px;background:linear-gradient(90deg,var(--rule),transparent);}
+.sec-lbl{font-family:'Cinzel',serif;font-size:.66rem;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--ink2);white-space:nowrap;}
+.sec-ico{font-size:.9rem;flex-shrink:0;}
+.dbl{border:none;border-top:3px double var(--rule);margin:1.5rem 0;opacity:.5;}
+.lead{border:1px solid var(--p3);border-top:3px solid var(--gold);padding:1rem 1.3rem 1rem 2.4rem;margin-bottom:1rem;background:linear-gradient(160deg,rgba(184,144,42,.06),transparent);position:relative;}
+.lead-n{position:absolute;top:.9rem;left:.8rem;font-family:'Cinzel',serif;font-size:.65rem;font-weight:900;color:var(--gold);}
+.lead-hl{font-family:'Playfair Display',serif;font-weight:700;font-size:1.2rem;color:var(--ink);line-height:1.2;margin-bottom:.32rem;}
+.lead-sum{font-size:.88rem;color:var(--ink2);line-height:1.65;margin-bottom:.28rem;}
+.src{font-family:'IM Fell English SC',serif;font-size:.63rem;color:var(--gold);letter-spacing:.06em;border-bottom:1px solid rgba(184,144,42,.35);display:inline;}
+code{font-family:'Courier New',monospace;font-size:.85rem;background:rgba(139,105,20,.12);padding:.05rem .3rem;}
+.hl-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 1.4rem;}
+.hl-item{padding:.62rem 0;border-bottom:1px dotted rgba(139,105,20,.3);display:grid;grid-template-columns:auto 1fr;gap:.5rem .75rem;}
+.hl-item:last-child{border-bottom:none;}
+.hl-n{font-family:'Cinzel',serif;font-size:.63rem;font-weight:900;color:var(--gold);padding-top:.1rem;min-width:1.1rem;}
+.hl-h{font-family:'Playfair Display',serif;font-weight:700;font-size:.92rem;color:var(--ink);line-height:1.22;margin-bottom:.16rem;}
+.hl-s{font-size:.81rem;color:var(--ink2);line-height:1.55;margin-bottom:.2rem;}
+.watch-grid{display:grid;grid-template-columns:1fr 1fr;gap:.85rem;}
+.watch-card{border:1px solid var(--p3);padding:.72rem .95rem;position:relative;overflow:hidden;}
+.watch-card::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--wc,var(--gold)),transparent);opacity:.4;}
+.wc-purple{--wc:#7a5a9a;background:rgba(74,42,122,.04);}
+.wc-green{--wc:#2a6b2a;background:rgba(42,107,42,.04);}
+.wc-brown{--wc:#8b5a2a;background:rgba(92,58,26,.04);}
+.wc-gray{--wc:#888780;background:rgba(136,135,128,.04);}
+.wc-name{font-family:'Cinzel',serif;font-size:.65rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink);margin-bottom:.28rem;}
+.wc-body{font-size:.81rem;color:var(--ink2);line-height:1.58;}
+.wc-body.dim{color:var(--ink3);font-style:italic;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:1.8rem;}
+.potion-card{background:rgba(42,107,42,.04);border:1px solid rgba(42,107,42,.2);border-left:3px solid #2a6b2a;padding:.72rem 1rem .72rem 2.7rem;position:relative;margin-bottom:.45rem;}
+.potion-ico{position:absolute;left:.7rem;top:.62rem;font-size:.95rem;}
+.potion-text{font-size:.84rem;color:var(--ink2);line-height:1.62;}
+.spell-list{list-style:none;}
+.spell{display:flex;align-items:flex-start;gap:.62rem;padding:.42rem 0;border-bottom:1px dotted rgba(139,105,20,.25);}
+.spell:last-child{border-bottom:none;}
+.spell-box{width:13px;height:13px;border:1.5px solid var(--gold);flex-shrink:0;margin-top:.22rem;background:rgba(184,144,42,.05);}
+.spell-txt{font-size:.84rem;color:var(--ink2);line-height:1.55;}
+.map-note{border-left:3px solid var(--p3);padding:.6rem 1rem;font-size:.84rem;color:var(--ink3);font-style:italic;line-height:1.62;background:rgba(139,105,20,.03);}
+.tl-wrap{border:1px solid var(--p3);overflow:hidden;margin-top:.5rem;}
+.tl-summary{display:flex;align-items:center;gap:.55rem;padding:.5rem .85rem;cursor:pointer;font-family:'Cinzel',serif;font-size:.63rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--ink3);background:rgba(139,105,20,.04);user-select:none;list-style:none;}
+.tl-summary::-webkit-details-marker{display:none;}
+.tl-body{padding:.65rem .85rem;font-size:.81rem;color:var(--ink3);font-style:italic;border-top:1px dotted var(--p3);}
+.footer{text-align:center;padding:1.1rem 2.5rem 1.7rem;border-top:3px double var(--rule);}
+.footer-txt{font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.18em;color:var(--ink3);}
+.footer-motto{font-family:'IM Fell English',serif;font-style:italic;font-size:.79rem;color:var(--ink2);margin-top:.28rem;}
+.fi{animation:fi .45s ease-out both;}
+.d1{animation-delay:.08s}.d2{animation-delay:.16s}.d3{animation-delay:.24s}.d4{animation-delay:.32s}.d5{animation-delay:.4s}.d6{animation-delay:.48s}
+@keyframes fi{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:600px){.masthead,.body,.footer{padding-left:1.4rem;padding-right:1.4rem;}.two-col,.hl-cols,.watch-grid{grid-template-columns:1fr;}}
 </style>
 </head>
 <body>
-  <div id="motes" aria-hidden="true"></div>
-  <main class="paper">
-    <div class="paper-inner">
-      <header class="nameplate">
-        <div class="kicker">Wizarding Britain Morning Edition</div>
-        <div class="flag">The Daily Prophet</div>
-        <div class="sub">$(HtmlEncode $Data.MastheadLine)</div>
-      </header>
+<div class="mote" style="left:7%;animation-duration:21s;animation-delay:0s;--dx:20px"></div>
+<div class="mote" style="left:22%;animation-duration:27s;animation-delay:5s;--dx:-18px"></div>
+<div class="mote" style="left:41%;animation-duration:18s;animation-delay:9s;--dx:30px"></div>
+<div class="mote" style="left:60%;animation-duration:24s;animation-delay:2s;--dx:-25px"></div>
+<div class="mote" style="left:78%;animation-duration:20s;animation-delay:7s;--dx:22px"></div>
+<div class="mote" style="left:91%;animation-duration:29s;animation-delay:12s;--dx:-20px"></div>
 
-      <div class="meta">
-        <div>$(HtmlEncode $dateDisplay)</div>
-        <div>Edition: $(HtmlEncode $Data.Edition)</div>
-        <div>Issue ID: $(HtmlEncode $Data.IssueId)</div>
-      </div>
-
-      <section class="summary">
-        <strong>Overall</strong>$(HtmlEncode $Data.Overall)
-      </section>
-
-      $(Render-FrontPage -FrontLead $Data.FrontLead -FrontColumns $Data.FrontColumns)
-
-      $(Render-Watchlist -Items $Data.WatchlistItems)
-
-      <section class="section">
-        <div class="section-kicker">Potion Notes</div>
-        <div class="note-box">$(HtmlEncode $Data.PotionNotes)</div>
-      </section>
-
-      $(Render-Spells -Todos $Data.Spells)
-
-      <section class="section">
-        <div class="section-kicker">The Map</div>
-        <blockquote class="map-quote">$(HtmlEncode $Data.MapText)</blockquote>
-      </section>
-
-      <footer class="footer">
-        <div>Sources: $(HtmlEncode $sourcesHtml)</div>
-        <div>Filed under $(HtmlEncode $Data.Title)</div>
-      </footer>
+<div class="paper">
+  <div class="masthead">
+    <div class="mh-bar">
+      <div class="mh-rule"></div>
+      <div class="mh-eyebrow">Curated from your universe &middot; Est. by order of the Ministry</div>
+      <div class="mh-rule"></div>
     </div>
-  </main>
-<script>
-const wrap=document.getElementById('motes');
-for(let i=0;i<24;i++){
-  const mote=document.createElement('span');
-  mote.className='mote';
-  mote.style.left=Math.random()*100+'vw';
-  mote.style.animationDuration=(10+Math.random()*14)+'s';
-  mote.style.animationDelay=(-Math.random()*18)+'s';
-  mote.style.setProperty('--dx',((Math.random()*50)-25)+'px');
-  wrap.appendChild(mote);
-}
-</script>
+    <div class="mh-title">The Daily Prophet</div>
+    <div class="mh-subtitle">Autonomous Intelligence Dispatch &middot; America / New York</div>
+    <div class="mh-meta">
+      <span>Vol. I &nbsp;&middot;&nbsp; Issue&nbsp;<strong>{{ISSUE_ID}}</strong></span>
+      <div class="seal">&#x1F989;</div>
+      <span>{{DATE_DISPLAY}} &nbsp;&middot;&nbsp; Owl-posted at dawn</span>
+    </div>
+  </div>
+
+  <div class="ribbon">{{RIBBON_ICON}}&nbsp;&nbsp;{{EDITION}}&nbsp;&nbsp;{{RIBBON_ICON}}</div>
+
+  <div class="body">
+    <div class="dispatch fi d1">
+      <div class="dispatch-owl">&#x1F989;</div>
+      <div class="dispatch-head">The Daily Prophet</div>
+      <div class="dispatch-sub">{{DISPATCH_SUBTITLE}}</div>
+    </div>
+    <div class="nav-strip fi d1">{{NAV_STRIP}}</div>
+
+    <hr class="dbl">
+
+    <div class="sec fi d2">
+      <div class="sec-rl"></div><span class="sec-ico">&#x1F5DE;&#xFE0F;</span>
+      <span class="sec-lbl">Front Page &mdash; Top Headlines</span>
+      <div class="sec-rr"></div>
+    </div>
+
+    <div class="lead fi d2">
+      <div class="lead-n">I.</div>
+      <div class="lead-hl">{{LEAD_HEADLINE}}</div>
+      <div class="lead-sum">{{LEAD_SUMMARY}}</div>
+      <span class="src">{{LEAD_SOURCE}}</span>
+    </div>
+
+    <div class="hl-cols fi d3">
+      <div>{{HEADLINES_COL_LEFT}}</div>
+      <div>{{HEADLINES_COL_RIGHT}}</div>
+    </div>
+
+    <hr class="dbl">
+
+    <div class="sec fi d3">
+      <div class="sec-rl"></div><span class="sec-ico">&#x1F3F0;</span>
+      <span class="sec-lbl">Hogwarts Watchlist &mdash; Your Active Worlds</span>
+      <div class="sec-rr"></div>
+    </div>
+    <div class="watch-grid fi d4">{{WATCHLIST_CARDS}}</div>
+
+    <hr class="dbl">
+
+    <div class="two-col fi d5">
+      <div>
+        <div class="sec">
+          <div class="sec-rl"></div><span class="sec-ico">&#x1F9EA;</span>
+          <span class="sec-lbl">Potion Notes</span>
+          <div class="sec-rr"></div>
+        </div>
+        {{POTION_NOTES}}
+
+        <div class="sec" style="margin-top:1.3rem">
+          <div class="sec-rl"></div><span class="sec-ico">&#x1FA84;</span>
+          <span class="sec-lbl">Today's Spells</span>
+          <div class="sec-rr"></div>
+        </div>
+        <ul class="spell-list">{{SPELLS}}</ul>
+      </div>
+      <div>
+        <div class="sec">
+          <div class="sec-rl"></div><span class="sec-ico">&#x1F5FA;&#xFE0F;</span>
+          <span class="sec-lbl">The Map</span>
+          <div class="sec-rr"></div>
+        </div>
+        <div class="map-note">{{THE_MAP}}</div>
+
+        <div class="sec" style="margin-top:1.3rem">
+          <div class="sec-rl"></div><span class="sec-ico">&#x1F30D;</span>
+          <span class="sec-lbl">Translation</span>
+          <div class="sec-rr"></div>
+        </div>
+        <details class="tl-wrap">
+          <summary class="tl-summary">&#x1F30D; &nbsp;Only when enabled</summary>
+          <div class="tl-body">
+            <div style="margin-bottom:.28rem">Target language: {{TARGET_LANGUAGE}}</div>
+            <div>Translated briefing: {{TRANSLATED_BRIEFING}}</div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer fi d6">
+    <div class="footer-txt">Printed by Order of the Ministry of Magic &nbsp;&middot;&nbsp; {{EDITION}} &nbsp;&middot;&nbsp; Issue {{ISSUE_ID}} &nbsp;&middot;&nbsp; {{DATE_DISPLAY}}</div>
+    <div class="footer-motto">"Owl-posted at dawn. Curated from your universe."</div>
+  </div>
+</div>
 </body>
 </html>
-"@
+'@
+
+  $html = $template
+  foreach ($key in $Slots.Keys) {
+    $html = $html.Replace("{{$key}}", [string]$Slots[$key])
+  }
+  return $html
 }
 
-function Render-Placeholder([string]$IssueDate) {
-  $dateDisplay = [datetime]::Parse($IssueDate).ToString('dddd, MMMM d, yyyy')
-  return @"
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Daily Prophet — $(HtmlEncode $dateDisplay) · Morning</title>
-<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Cinzel:wght@400;600;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-<style>
-:root {
-  --p:#f2e8d0;--p2:#ecdfc5;--p3:#d9c9a0;
-  --ink:#1a1208;--ink2:#3d2f1a;--ink3:#6b5535;
-  --gold:#b8902a;--gold3:#e8cc7a;--rule:#8b6914;
-  --red:#8b1a1a;--red2:#5c0f0f;--sh:rgba(26,18,8,.32);
-}
-*{margin:0;padding:0;box-sizing:border-box;}
-body{background:#18110a;min-height:100vh;padding:2rem 1rem 5rem;font-family:'IM Fell English',Georgia,serif;color:var(--ink);}
-.paper{max-width:920px;margin:0 auto;background:var(--p);background-image:linear-gradient(158deg,#f6eed9 0%,#f2e8d0 40%,#ecdfc5 75%,#e4d5b5 100%);box-shadow:0 0 0 1px var(--p3),0 22px 60px var(--sh);padding:1.5rem 1.2rem 2rem}
-.nameplate{border-top:3px double var(--rule);border-bottom:3px double var(--rule);padding:1rem 0 .85rem;text-align:center}
-.kicker{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink3);margin-bottom:.35rem}
-.flag{font-family:'UnifrakturMaguntia',serif;font-size:clamp(2.8rem,8vw,5.2rem);line-height:1;color:var(--ink)}
-.sub{font-family:'IM Fell English SC',serif;font-size:.9rem;letter-spacing:.08em;color:var(--ink2);margin-top:.45rem}
-.notice{padding:2rem 0 1rem;text-align:center}
-.notice h1{font-family:'Playfair Display',serif;font-size:2.2rem;margin-bottom:.65rem}
-.notice p{font-size:1.15rem;line-height:1.6;color:var(--ink2)}
-</style>
-</head>
-<body>
-  <main class="paper">
-    <header class="nameplate">
-      <div class="kicker">Wizarding Britain Morning Edition</div>
-      <div class="flag">The Daily Prophet</div>
-      <div class="sub">No issue on the stands just yet</div>
-    </header>
-    <section class="notice">
-      <h1>No issue yet</h1>
-      <p>Check back after 6 AM ET for the next owl-posted morning edition.</p>
-    </section>
-  </main>
-</body>
-</html>
-"@
+function Render-NoIssuePage([string]$DateDisplay) {
+  $slots = @{
+    DATE_DISPLAY        = HtmlEncode $DateDisplay
+    EDITION             = 'Morning Edition'
+    RIBBON_ICON         = '&#9728;'
+    ISSUE_ID            = '&mdash;'
+    DISPATCH_SUBTITLE   = 'No issue yet - check back after 6 AM ET'
+    NAV_STRIP           = 'Front Page &middot; Hogwarts Watchlist &middot; Potion Notes &middot; Today''s Spells &middot; The Map'
+    LEAD_HEADLINE       = 'No issue yet'
+    LEAD_SUMMARY        = 'Check back after 6 AM ET for the next owl-posted morning edition.'
+    LEAD_SOURCE         = ''
+    HEADLINES_COL_LEFT  = ''
+    HEADLINES_COL_RIGHT = ''
+    WATCHLIST_CARDS     = ''
+    POTION_NOTES        = (Render-PotionCard 'No potion notes have been filed for this edition yet.')
+    SPELLS              = '<li class="spell"><div class="spell-box"></div><div class="spell-txt">Wait for the morning issue to arrive.</div></li>'
+    THE_MAP             = 'The newsroom is still gathering its morning dispatch.'
+    TARGET_LANGUAGE     = '(not set)'
+    TRANSLATED_BRIEFING = '(disabled for this issue)'
+  }
+
+  return Render-Template $slots
 }
 
 $issueDate = Get-IssueDate
+$dateDisplay = Get-DateDisplay $issueDate
+
 $queryBody = @{
   filter = @{
     and = @(
@@ -388,57 +590,148 @@ $queryBody = @{
   }
 }
 
-$resp = Invoke-NotionJson -Method Post -Uri "https://api.notion.com/v1/databases/$DatabaseId/query" -Body $queryBody
+$queryUri = "https://api.notion.com/v1/databases/$DatabaseId/query"
+$queryResponse = Invoke-NotionJson -Method Post -Uri $queryUri -Body $queryBody
 
-if (-not $resp.results -or $resp.results.Count -eq 0) {
-  Render-Placeholder -IssueDate $issueDate | Set-Content -LiteralPath $OutputPath -Encoding UTF8
-  Write-Host "Wrote placeholder issue for $issueDate"
+if (-not $queryResponse.results -or $queryResponse.results.Count -eq 0) {
+  $html = Render-NoIssuePage $dateDisplay
+  Write-Utf8File -Path $OutputPath -Content $html
+  Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $EmDash + ' ' + $EmDash + ' ' + $issueDate)
   exit 0
 }
 
-$page = $resp.results[0]
+$page = $queryResponse.results[0]
 $props = $page.properties
 $blocks = @(Get-NotionChildren $page.id)
 
-$masthead = ($blocks | Where-Object { $_.type -eq 'callout' } | Select-Object -First 1)
-$mastheadLine = ''
-if ($masthead -and $masthead.has_children) {
-  $mastheadLine = ((Get-NotionChildren $masthead.id) | ForEach-Object { Get-BlockText $_ }) -join ' '
+$callouts = @($blocks | Where-Object { $_.type -eq 'callout' })
+$dispatchCallout = $callouts[0]
+$navCallout = $callouts[1]
+
+$dispatchSubtitle = ''
+if ($dispatchCallout.has_children) {
+  $dispatchSubtitle = Clean-Separator (((Get-NotionChildren $dispatchCallout.id) | ForEach-Object { Get-RecursiveBlockText $_ }) -join ' ')
+}
+if (-not $dispatchSubtitle) {
+  $dispatchSubtitle = Get-PlainFromRichText $dispatchCallout.callout.rich_text
 }
 
-$frontLead = Get-BlockText ($blocks | Where-Object { $_.type -eq 'quote' } | Select-Object -First 1)
-$columnLists = @($blocks | Where-Object { $_.type -eq 'column_list' })
-$frontColumns = if ($columnLists.Count -gt 0) { Get-ColumnBlocks $columnLists[0].id } else { @() }
-$watchColumns = if ($columnLists.Count -gt 1) { Get-ColumnBlocks $columnLists[1].id } else { @() }
+$navStrip = Get-PlainFromRichText $navCallout.callout.rich_text
+if (-not $navStrip) {
+  $navStrip = Get-RecursiveBlockText $navCallout
+}
 
-$watchlistItems = @()
-foreach ($column in $watchColumns) {
-  foreach ($callout in $column) {
-    if ($callout.type -eq 'callout') {
-      $watchlistItems += Get-WatchlistItem $callout
-    }
+$headings = @($blocks | Where-Object { $_.type -eq 'heading_1' })
+$frontHeading  = $headings[0]
+$watchHeading  = $headings[1]
+$potionHeading = $headings[2]
+$spellsHeading = $headings[3]
+$mapHeading    = $headings[4]
+
+$frontIndex  = [array]::IndexOf($blocks, $frontHeading)
+$watchIndex  = [array]::IndexOf($blocks, $watchHeading)
+$potionIndex = [array]::IndexOf($blocks, $potionHeading)
+$spellsIndex = [array]::IndexOf($blocks, $spellsHeading)
+$mapIndex    = [array]::IndexOf($blocks, $mapHeading)
+
+$leadBlock = $blocks[$frontIndex + 1]
+$leadRecord = Split-RichTextRecord $leadBlock.quote.rich_text
+
+$frontColumnList = $blocks[$frontIndex + 2]
+$frontColumns = Get-ColumnChildren $frontColumnList.id
+
+$romanNumerals = @('II.','III.','IV.','V.','VI.','VII.')
+$romanIndex = 0
+
+$leftHeadlineMarkup = @()
+foreach ($item in @($frontColumns[0])) {
+  $leftHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
+  $romanIndex++
+}
+
+$rightHeadlineMarkup = @()
+foreach ($item in @($frontColumns[1])) {
+  $rightHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
+  $romanIndex++
+}
+
+$watchColumnList = $blocks[$watchIndex + 1]
+$watchColumns = Get-ColumnChildren $watchColumnList.id
+$watchCards = @()
+foreach ($column in @($watchColumns)) {
+  foreach ($callout in @($column)) {
+    $watchCards += Render-WatchCard $callout
   }
 }
 
-$potionNotes = Get-BlockText ($blocks | Where-Object { $_.type -eq 'callout' } | Select-Object -Last 1)
-$spells = @($blocks | Where-Object { $_.type -eq 'to_do' })
-$mapText = Get-BlockText ($blocks | Where-Object { $_.type -eq 'quote' } | Select-Object -Last 1)
+$potionCallout = $blocks[$potionIndex + 1]
+$potionText = Get-RecursiveBlockText $potionCallout
+if (-not $potionText) {
+  $potionText = Get-PlainFromRichText $potionCallout.callout.rich_text
+}
+$potionMarkup = Render-PotionCard $potionText
 
-$data = @{
-  Title        = Get-PropertyPlainText $props.Title
-  Date         = Get-PropertyPlainText $props.Date
-  Edition      = Get-PropertyPlainText $props.Edition
-  IssueId      = Get-PropertyPlainText $props.'Issue ID'
-  Overall      = Get-PropertyPlainText $props.Overall
-  Sources      = Get-PropertyPlainText $props.Sources
-  MastheadLine = $mastheadLine
-  FrontLead    = $frontLead
-  FrontColumns = $frontColumns
-  WatchlistItems = $watchlistItems
-  PotionNotes  = $potionNotes
-  Spells       = $spells
-  MapText      = $mapText
+$spellBlocks = @()
+for ($i = $spellsIndex + 1; $i -lt $mapIndex; $i++) {
+  if ($blocks[$i].type -eq 'to_do') {
+    $spellBlocks += $blocks[$i]
+  }
 }
 
-Render-Page -Data $data | Set-Content -LiteralPath $OutputPath -Encoding UTF8
-Write-Host "Wrote issue to $OutputPath"
+$spellMarkup = @()
+foreach ($spellBlock in $spellBlocks) {
+  $spellMarkup += Render-SpellItem $spellBlock
+}
+
+$mapBlock = $blocks[$mapIndex + 1]
+$mapText = Get-PlainFromRichText $mapBlock.quote.rich_text
+
+$editionRaw = Get-PropertyPlainText $props.Edition
+$editionLabel = Get-EditionLabel $editionRaw
+$issueId = Get-PropertyPlainText $props.'Issue ID'
+$translationEnabled = $false
+if ($props.PSObject.Properties.Name -contains 'Translation') {
+  $translationEnabled = [bool]$props.Translation.checkbox
+}
+
+$targetLanguage = ''
+if ($props.PSObject.Properties.Name -contains 'Target language') {
+  $targetLanguage = Get-PropertyPlainText $props.'Target language'
+}
+if (-not $targetLanguage) {
+  $targetLanguage = '(not set)'
+}
+
+$translatedBriefing = '(disabled for this issue)'
+if ($translationEnabled) {
+  if ($props.PSObject.Properties.Name -contains 'Translated briefing') {
+    $translatedBriefing = Get-PropertyPlainText $props.'Translated briefing'
+  }
+  if (-not $translatedBriefing) {
+    $translatedBriefing = '(not set)'
+  }
+}
+
+$slots = @{
+  DATE_DISPLAY        = HtmlEncode $dateDisplay
+  EDITION             = HtmlEncode $editionLabel
+  RIBBON_ICON         = Get-RibbonIcon $editionLabel
+  ISSUE_ID            = HtmlEncode $issueId
+  DISPATCH_SUBTITLE   = HtmlEncode $dispatchSubtitle
+  NAV_STRIP           = HtmlEncode $navStrip
+  LEAD_HEADLINE       = HtmlEncode $leadRecord.Headline
+  LEAD_SUMMARY        = HtmlEncode $leadRecord.Summary
+  LEAD_SOURCE         = HtmlEncode $leadRecord.Source
+  HEADLINES_COL_LEFT  = ($leftHeadlineMarkup -join "`n")
+  HEADLINES_COL_RIGHT = ($rightHeadlineMarkup -join "`n")
+  WATCHLIST_CARDS     = ($watchCards -join "`n")
+  POTION_NOTES        = $potionMarkup
+  SPELLS              = ($spellMarkup -join "`n")
+  THE_MAP             = HtmlEncode $mapText
+  TARGET_LANGUAGE     = HtmlEncode $targetLanguage
+  TRANSLATED_BRIEFING = HtmlEncode $translatedBriefing
+}
+
+$html = Render-Template $slots
+Write-Utf8File -Path $OutputPath -Content $html
+Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $issueId + ' ' + $EmDash + ' ' + $issueDate)
