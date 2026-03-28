@@ -97,7 +97,7 @@ function Get-MentionTitle([string]$PageId) {
   if ($MentionCache.ContainsKey($PageId)) { return $MentionCache[$PageId] }
 
   try {
-    $page = Invoke-NotionJson -Method Get -Uri "https://api.notion.com/v1/pages/$($PageId -replace '-','')"
+    $page = Invoke-RestMethod -Method Get -Uri "https://api.notion.com/v1/pages/$($PageId -replace '-','')" -Headers (Get-NotionHeaders) -TimeoutSec 10
     $titleProperty = $page.properties.PSObject.Properties | Where-Object { $_.Value.type -eq 'title' } | Select-Object -First 1
     $title = ''
     if ($titleProperty) {
@@ -154,12 +154,12 @@ function Join-Segments($Segments, [scriptblock]$Filter) {
     }
   }
 
-  return Clean-Separator (($parts -join '').Trim())
+  return Clean-Separator (($parts -join ' ').Trim())
 }
 
 function Get-PlainFromRichText($RichText) {
   $segments = Get-RichSegments $RichText
-  return Clean-Separator (($segments | ForEach-Object { $_.Text }) -join '')
+  return Clean-Separator (($segments | ForEach-Object { $_.Text }) -join ' ')
 }
 
 function Get-BlockPlainText($Block) {
@@ -202,7 +202,7 @@ function Split-RichTextRecord($RichText) {
   $source   = Join-Segments $segments { param($s) $s.IsMention }
 
   if (-not $headline) {
-    $fullText = Clean-Separator (($segments | ForEach-Object { $_.Text }) -join '')
+    $fullText = Clean-Separator (($segments | ForEach-Object { $_.Text }) -join ' ')
     $parts = [regex]::Split($fullText, $DashPattern, 2)
     $headline = if ($parts.Count -ge 1) { $parts[0].Trim() } else { $fullText }
     $summary = if ($parts.Count -ge 2) { Clean-Separator $parts[1] } else { '' }
