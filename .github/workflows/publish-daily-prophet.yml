@@ -1,0 +1,66 @@
+name: Publish Daily Prophet
+
+on:
+  schedule:
+    - cron: '5 10 * * *'
+    - cron: '5 11 * * *'
+  workflow_dispatch:
+    inputs:
+      issue_date:
+        description: Optional override date in YYYY-MM-DD
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-prophet-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    env:
+      NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+      ISSUE_DATE: ${{ inputs.issue_date }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Notion secret
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NOTION_API_KEY)) {
+            throw 'Missing NOTION_API_KEY GitHub Actions secret.'
+          }
+
+      - name: Build Daily Prophet
+        shell: pwsh
+        run: ./build-daily-prophet.ps1
+
+      - name: Check for changes
+        id: changes
+        shell: pwsh
+        run: |
+          git add index.html
+          if (git diff --cached --quiet) {
+            "changed=false" >> $env:GITHUB_OUTPUT
+          } else {
+            "changed=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Commit updated issue
+        if: steps.changes.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Publish Daily Prophet issue"
+
+      - name: Push updated issue
+        if: steps.changes.outputs.changed == 'true'
+        shell: pwsh
+        run: git push
