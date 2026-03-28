@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Daily Prophet</title>
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Cinzel:wght@400;600;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --p:#f2e8d0;--p2:#ecdfc5;--p3:#d9c9a0;
+  --ink:#1a1208;--ink2:#3d2f1a;--ink3:#6b5535;
+  --gold:#b8902a;--gold3:#e8cc7a;--rule:#8b6914;
+  --red:#8b1a1a;--red2:#5c0f0f;--sh:rgba(26,18,8,.32);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#18110a;min-height:100vh;padding:2rem 1rem 5rem;font-family:'IM Fell English',Georgia,serif;color:var(--ink);}
+.paper{max-width:920px;margin:0 auto;background:var(--p);background-image:linear-gradient(158deg,#f6eed9 0%,#f2e8d0 40%,#ecdfc5 75%,#e4d5b5 100%);box-shadow:0 0 0 1px var(--p3),0 22px 60px var(--sh);padding:2rem 1.25rem 3rem;}
+.nameplate{border-top:3px double var(--rule);border-bottom:3px double var(--rule);padding:1rem 0 .85rem;text-align:center;margin-bottom:1.5rem;}
+.kicker{font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink3);margin-bottom:.35rem;}
+.flag{font-family:'UnifrakturMaguntia',serif;font-size:clamp(2.7rem,8vw,5rem);line-height:1;color:var(--ink);}
+.sub{font-family:'IM Fell English SC',serif;font-size:.95rem;letter-spacing:.08em;color:var(--ink2);margin-top:.4rem;}
+.rule{height:1px;background:linear-gradient(90deg,transparent,var(--rule),transparent);margin:1.25rem 0;}
+.hero{text-align:center;padding:2rem 1rem;}
+.hero h1{font-family:'Playfair Display',serif;font-size:clamp(2rem,4vw,3rem);line-height:1.05;margin-bottom:.75rem;}
+.hero p{max-width:42rem;margin:0 auto;font-size:1.1rem;line-height:1.6;color:var(--ink2);}
+.note{margin-top:1.5rem;font-family:'Cinzel',serif;font-size:.9rem;letter-spacing:.08em;text-transform:uppercase;color:var(--red);}
+</style>
+</head>
+<body>
+  <main class="paper">
+    <header class="nameplate">
+      <div class="kicker">Wizarding Britain Morning Edition</div>
+      <div class="flag">The Daily Prophet</div>
+      <div class="sub">Special Broadsheet Hosting Edition</div>
+    </header>
+    <div class="rule"></div>
+    <section class="hero">
+      <h1>Presses Warming</h1>
+      <p>This repository is ready to publish the Daily Prophet as a styled static site. Once the Notion feed is connected, each morning edition will be rendered here automatically.</p>
+      <div class="note">No issue loaded yet</div>
+    </section>
+  </main>
+</body>
+</html>
