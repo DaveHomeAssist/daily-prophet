@@ -45,7 +45,7 @@ jobs:
         id: changes
         shell: pwsh
         run: |
-          git add index.html
+          git add index.html issues/
           $changedFiles = @(git diff --cached --name-only)
           if ($changedFiles.Count -eq 0) {
             "changed=false" >> $env:GITHUB_OUTPUT
