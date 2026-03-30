@@ -628,40 +628,43 @@ function Get-IssueRenderData($Page, [string]$ArchiveHref) {
   $blocks = @(Get-NotionChildren $Page.id)
 
   $callouts = @($blocks | Where-Object { $_.type -eq 'callout' })
-  $dispatchCallout = $callouts[0]
-  $navCallout = $callouts[1]
+  $dispatchCallout = if ($callouts.Count -gt 0) { $callouts[0] } else { $null }
+  $navCallout = if ($callouts.Count -gt 1) { $callouts[1] } else { $null }
 
   $dispatchSubtitle = ''
-  if ($dispatchCallout.has_children) {
+  if ($dispatchCallout -and $dispatchCallout.has_children) {
     $dispatchSubtitle = Clean-Separator (((Get-NotionChildren $dispatchCallout.id) | ForEach-Object { Get-RecursiveBlockText $_ }) -join ' ')
   }
-  if (-not $dispatchSubtitle) {
+  if (-not $dispatchSubtitle -and $dispatchCallout) {
     $dispatchSubtitle = Get-PlainFromRichText $dispatchCallout.callout.rich_text
   }
 
-  $navStrip = Get-PlainFromRichText $navCallout.callout.rich_text
-  if (-not $navStrip) {
-    $navStrip = Get-RecursiveBlockText $navCallout
+  $navStrip = ''
+  if ($navCallout) {
+    $navStrip = Get-PlainFromRichText $navCallout.callout.rich_text
+    if (-not $navStrip) {
+      $navStrip = Get-RecursiveBlockText $navCallout
+    }
   }
 
   $headings = @($blocks | Where-Object { $_.type -eq 'heading_1' })
-  $frontHeading  = $headings[0]
-  $watchHeading  = $headings[1]
-  $potionHeading = $headings[2]
-  $spellsHeading = $headings[3]
-  $mapHeading    = $headings[4]
+  $frontHeading  = if ($headings.Count -gt 0) { $headings[0] } else { $null }
+  $watchHeading  = if ($headings.Count -gt 1) { $headings[1] } else { $null }
+  $potionHeading = if ($headings.Count -gt 2) { $headings[2] } else { $null }
+  $spellsHeading = if ($headings.Count -gt 3) { $headings[3] } else { $null }
+  $mapHeading    = if ($headings.Count -gt 4) { $headings[4] } else { $null }
 
-  $frontIndex  = [array]::IndexOf($blocks, $frontHeading)
-  $watchIndex  = [array]::IndexOf($blocks, $watchHeading)
-  $potionIndex = [array]::IndexOf($blocks, $potionHeading)
-  $spellsIndex = [array]::IndexOf($blocks, $spellsHeading)
-  $mapIndex    = [array]::IndexOf($blocks, $mapHeading)
+  $frontIndex  = if ($frontHeading) { [array]::IndexOf($blocks, $frontHeading) } else { -1 }
+  $watchIndex  = if ($watchHeading) { [array]::IndexOf($blocks, $watchHeading) } else { -1 }
+  $potionIndex = if ($potionHeading) { [array]::IndexOf($blocks, $potionHeading) } else { -1 }
+  $spellsIndex = if ($spellsHeading) { [array]::IndexOf($blocks, $spellsHeading) } else { -1 }
+  $mapIndex    = if ($mapHeading) { [array]::IndexOf($blocks, $mapHeading) } else { -1 }
 
-  $leadBlock = $blocks[$frontIndex + 1]
-  $leadRecord = Split-RichTextRecord $leadBlock.quote.rich_text
+  $leadBlock = if ($frontIndex -ge 0 -and ($frontIndex + 1) -lt $blocks.Count) { $blocks[$frontIndex + 1] } else { $null }
+  $leadRecord = if ($leadBlock -and $leadBlock.quote) { Split-RichTextRecord $leadBlock.quote.rich_text } else { [pscustomobject]@{ Headline = ''; Summary = ''; Source = '' } }
 
-  $frontColumnList = $blocks[$frontIndex + 2]
-  $frontColumns = Get-ColumnChildren $frontColumnList.id
+  $frontColumnList = if ($frontIndex -ge 0 -and ($frontIndex + 2) -lt $blocks.Count) { $blocks[$frontIndex + 2] } else { $null }
+  $frontColumns = if ($frontColumnList -and $frontColumnList.id) { Get-ColumnChildren $frontColumnList.id } else { @(@(), @()) }
 
   $romanNumerals = @('II.','III.','IV.','V.','VI.','VII.')
   $romanIndex = 0
@@ -678,8 +681,8 @@ function Get-IssueRenderData($Page, [string]$ArchiveHref) {
     $romanIndex++
   }
 
-  $watchColumnList = $blocks[$watchIndex + 1]
-  $watchColumns = Get-ColumnChildren $watchColumnList.id
+  $watchColumnList = if ($watchIndex -ge 0 -and ($watchIndex + 1) -lt $blocks.Count) { $blocks[$watchIndex + 1] } else { $null }
+  $watchColumns = if ($watchColumnList -and $watchColumnList.id) { Get-ColumnChildren $watchColumnList.id } else { @() }
   $watchCards = @()
   foreach ($column in @($watchColumns)) {
     foreach ($callout in @($column)) {
@@ -687,17 +690,23 @@ function Get-IssueRenderData($Page, [string]$ArchiveHref) {
     }
   }
 
-  $potionCallout = $blocks[$potionIndex + 1]
-  $potionText = Get-RecursiveBlockText $potionCallout
-  if (-not $potionText) {
-    $potionText = Get-PlainFromRichText $potionCallout.callout.rich_text
+  $potionCallout = if ($potionIndex -ge 0 -and ($potionIndex + 1) -lt $blocks.Count) { $blocks[$potionIndex + 1] } else { $null }
+  $potionText = ''
+  if ($potionCallout) {
+    $potionText = Get-RecursiveBlockText $potionCallout
+    if (-not $potionText -and $potionCallout.callout) {
+      $potionText = Get-PlainFromRichText $potionCallout.callout.rich_text
+    }
   }
+  if (-not $potionText) { $potionText = 'No potion notes filed for this edition.' }
   $potionMarkup = Render-PotionCard $potionText
 
   $spellBlocks = @()
-  for ($i = $spellsIndex + 1; $i -lt $mapIndex; $i++) {
-    if ($blocks[$i].type -eq 'to_do') {
-      $spellBlocks += $blocks[$i]
+  if ($spellsIndex -ge 0 -and $mapIndex -ge 0) {
+    for ($i = $spellsIndex + 1; $i -lt $mapIndex; $i++) {
+      if ($blocks[$i].type -eq 'to_do') {
+        $spellBlocks += $blocks[$i]
+      }
     }
   }
 
@@ -706,8 +715,8 @@ function Get-IssueRenderData($Page, [string]$ArchiveHref) {
     $spellMarkup += Render-SpellItem $spellBlock
   }
 
-  $mapBlock = $blocks[$mapIndex + 1]
-  $mapText = Get-PlainFromRichText $mapBlock.quote.rich_text
+  $mapBlock = if ($mapIndex -ge 0 -and ($mapIndex + 1) -lt $blocks.Count) { $blocks[$mapIndex + 1] } else { $null }
+  $mapText = if ($mapBlock -and $mapBlock.quote) { Get-PlainFromRichText $mapBlock.quote.rich_text } else { 'No map notes for this edition.' }
 
   $editionRaw = Get-PropertyPlainText $props.Edition
   $editionLabel = Get-EditionLabel $editionRaw
