@@ -82,7 +82,7 @@ function Get-NotionChildren([string]$BlockId) {
     $cursor = $response.next_cursor
   } while ($cursor)
 
-  return @($results)
+  return , $results
 }
 
 function Get-AllIssuePages() {
@@ -109,7 +109,7 @@ function Get-AllIssuePages() {
     $cursor = $response.next_cursor
   } while ($cursor)
 
-  return @($results)
+  return , $results
 }
 
 function HtmlEncode([string]$Text) {
@@ -167,7 +167,7 @@ function Get-RichSegments($RichText) {
     }
   }
 
-  return @($segments)
+  return , $segments
 }
 
 function Clean-Separator([string]$Text) {
@@ -253,7 +253,7 @@ function Get-ColumnChildren([string]$ColumnListId) {
   foreach ($column in (Get-NotionChildren $ColumnListId)) {
     $columns += ,@(Get-NotionChildren $column.id)
   }
-  return @($columns)
+  return , $columns
 }
 
 function Get-RibbonIcon([string]$EditionLabel) {
@@ -647,7 +647,7 @@ function Get-IssueRenderData($Page, [string]$ArchiveHref) {
     }
   }
 
-  $headings = @($blocks | Where-Object { $_.type -eq 'heading_1' })
+  $headings = @($blocks | Where-Object { $_.type -eq 'heading_1' -or $_.type -eq 'heading_2' -or $_.type -eq 'heading_3' })
   $frontHeading  = if ($headings.Count -gt 0) { $headings[0] } else { $null }
   $watchHeading  = if ($headings.Count -gt 1) { $headings[1] } else { $null }
   $potionHeading = if ($headings.Count -gt 2) { $headings[2] } else { $null }
@@ -664,28 +664,40 @@ function Get-IssueRenderData($Page, [string]$ArchiveHref) {
   $leadRecord = if ($leadBlock -and $leadBlock.quote) { Split-RichTextRecord $leadBlock.quote.rich_text } else { [pscustomobject]@{ Headline = ''; Summary = ''; Source = '' } }
 
   $frontColumnList = if ($frontIndex -ge 0 -and ($frontIndex + 2) -lt $blocks.Count) { $blocks[$frontIndex + 2] } else { $null }
-  $frontColumns = if ($frontColumnList -and $frontColumnList.id) { Get-ColumnChildren $frontColumnList.id } else { @(@(), @()) }
+  $frontColumns = if ($frontColumnList -and $frontColumnList.type -eq 'column_list') { Get-ColumnChildren $frontColumnList.id } else { @() }
+  if ($null -eq $frontColumns) { $frontColumns = @() }
 
   $romanNumerals = @('II.','III.','IV.','V.','VI.','VII.')
   $romanIndex = 0
 
   $leftHeadlineMarkup = @()
-  foreach ($item in @($frontColumns[0])) {
-    $leftHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
-    $romanIndex++
+  if ($frontColumns.Count -gt 0) {
+    foreach ($item in @($frontColumns[0])) {
+      if ($item -and $item.bulleted_list_item) {
+        $leftHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
+        $romanIndex++
+      }
+    }
   }
 
   $rightHeadlineMarkup = @()
-  foreach ($item in @($frontColumns[1])) {
-    $rightHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
-    $romanIndex++
+  if ($frontColumns.Count -gt 1) {
+    foreach ($item in @($frontColumns[1])) {
+      if ($item -and $item.bulleted_list_item) {
+        $rightHeadlineMarkup += Render-HeadlineItem -Roman $romanNumerals[$romanIndex] -Record (Split-RichTextRecord $item.bulleted_list_item.rich_text)
+        $romanIndex++
+      }
+    }
   }
 
   $watchColumnList = if ($watchIndex -ge 0 -and ($watchIndex + 1) -lt $blocks.Count) { $blocks[$watchIndex + 1] } else { $null }
-  $watchColumns = if ($watchColumnList -and $watchColumnList.id) { Get-ColumnChildren $watchColumnList.id } else { @() }
+  $watchColumns = if ($watchColumnList -and $watchColumnList.type -eq 'column_list') { Get-ColumnChildren $watchColumnList.id } else { @() }
+  if ($null -eq $watchColumns) { $watchColumns = @() }
   $watchCards = @()
   foreach ($column in @($watchColumns)) {
+    if ($null -eq $column) { continue }
     foreach ($callout in @($column)) {
+      if ($null -eq $callout) { continue }
       $watchCards += Render-WatchCard $callout
     }
   }
