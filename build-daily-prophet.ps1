@@ -66,6 +66,11 @@ function Invoke-DatabaseQuery($Body) {
 }
 
 function Get-NotionChildren([string]$BlockId) {
+  if (-not $BlockId -or $BlockId.Length -gt 36) {
+    Write-Host "WARN: skipping Get-NotionChildren for invalid BlockId ($($BlockId.Length) chars): $BlockId"
+    return , @()
+  }
+
   $results = @()
   $cursor = $null
 
@@ -75,7 +80,12 @@ function Get-NotionChildren([string]$BlockId) {
       $uri += "&start_cursor=$cursor"
     }
 
-    $response = Invoke-NotionJson -Method Get -Uri $uri
+    try {
+      $response = Invoke-NotionJson -Method Get -Uri $uri
+    } catch {
+      Write-Host "WARN: Get-NotionChildren failed for BlockId=$BlockId : $_"
+      return , @()
+    }
     if ($response.results) {
       $results += @($response.results)
     }
