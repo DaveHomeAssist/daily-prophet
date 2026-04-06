@@ -68,7 +68,7 @@ function Invoke-DatabaseQuery($Body) {
 function Get-NotionChildren([string]$BlockId) {
   if (-not $BlockId -or $BlockId.Length -gt 36) {
     Write-Host "WARN: skipping Get-NotionChildren for invalid BlockId ($($BlockId.Length) chars): $BlockId"
-    return , @()
+    return
   }
 
   $results = @()
@@ -84,7 +84,7 @@ function Get-NotionChildren([string]$BlockId) {
       $response = Invoke-NotionJson -Method Get -Uri $uri
     } catch {
       Write-Host "WARN: Get-NotionChildren failed for BlockId=$BlockId : $_"
-      return , @()
+      return
     }
     if ($response.results) {
       $results += @($response.results)
@@ -92,7 +92,7 @@ function Get-NotionChildren([string]$BlockId) {
     $cursor = $response.next_cursor
   } while ($cursor)
 
-  return , $results
+  return @($results)
 }
 
 function Get-AllIssuePages() {
@@ -119,7 +119,7 @@ function Get-AllIssuePages() {
     $cursor = $response.next_cursor
   } while ($cursor)
 
-  return , $results
+  return @($results)
 }
 
 function HtmlEncode([string]$Text) {
@@ -177,7 +177,7 @@ function Get-RichSegments($RichText) {
     }
   }
 
-  return , $segments
+  return @($segments)
 }
 
 function Clean-Separator([string]$Text) {
@@ -263,7 +263,7 @@ function Get-ColumnChildren([string]$ColumnListId) {
   foreach ($column in (Get-NotionChildren $ColumnListId)) {
     $columns += ,@(Get-NotionChildren $column.id)
   }
-  return , $columns
+  return @($columns)
 }
 
 function Get-RibbonIcon([string]$EditionLabel) {
@@ -674,8 +674,7 @@ function Get-IssueRenderData($Page, [string]$ArchiveHref) {
   $leadRecord = if ($leadBlock -and $leadBlock.quote) { Split-RichTextRecord $leadBlock.quote.rich_text } else { [pscustomobject]@{ Headline = ''; Summary = ''; Source = '' } }
 
   $frontColumnList = if ($frontIndex -ge 0 -and ($frontIndex + 2) -lt $blocks.Count) { $blocks[$frontIndex + 2] } else { $null }
-  $frontColumns = if ($frontColumnList -and $frontColumnList.type -eq 'column_list') { Get-ColumnChildren $frontColumnList.id } else { @() }
-  if ($null -eq $frontColumns) { $frontColumns = @() }
+  $frontColumns = if ($frontColumnList -and $frontColumnList.type -eq 'column_list') { @(Get-ColumnChildren $frontColumnList.id) } else { @() }
 
   $romanNumerals = @('II.','III.','IV.','V.','VI.','VII.')
   $romanIndex = 0
@@ -701,8 +700,7 @@ function Get-IssueRenderData($Page, [string]$ArchiveHref) {
   }
 
   $watchColumnList = if ($watchIndex -ge 0 -and ($watchIndex + 1) -lt $blocks.Count) { $blocks[$watchIndex + 1] } else { $null }
-  $watchColumns = if ($watchColumnList -and $watchColumnList.type -eq 'column_list') { Get-ColumnChildren $watchColumnList.id } else { @() }
-  if ($null -eq $watchColumns) { $watchColumns = @() }
+  $watchColumns = if ($watchColumnList -and $watchColumnList.type -eq 'column_list') { @(Get-ColumnChildren $watchColumnList.id) } else { @() }
   $watchCards = @()
   foreach ($column in @($watchColumns)) {
     if ($null -eq $column) { continue }
