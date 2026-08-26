@@ -27,5 +27,11 @@ Sourced from actual commit history (`git log`). This covers the substantive chan
 ## 2026-07-06 — Licensing
 - Added an explicit all-rights-reserved `LICENSE`.
 
+## 2026-08-26 — Audit remediation (2026-08-24 portfolio audit H-1, H-2, M-1, M-2)
+- H-1: the front page now shows the day's most recently created edition (Morning, Evening, or Breaking) instead of only Morning, and the workflow gained 6:05 PM ET evening runs so the twice-daily cadence actually publishes the PM briefing.
+- H-2: archive files are materialized for every database page on both the normal and fallback paths, so the archive ledger can no longer link to files that were never written (15 ledger links were 404 on the live site).
+- M-1: added `validate-daily-prophet.ps1` and a workflow step that fails the publish on an incomplete front page, unresolved archive ledger links, unreplaced template slots, or a fallback front page while today's issue is archived.
+- M-2: the generated issue and archive pages now carry header/main/footer/nav landmarks and an h1/h2/h3 heading outline for screen-reader navigation, with unchanged visual output.
+
 ## Ongoing
 - Twice-daily automated "Publish Daily Prophet issue" commits from the scheduled workflow, running continuously from 2026-03-28 through the present, each regenerating `index.html` and archiving the issue under `issues/`.

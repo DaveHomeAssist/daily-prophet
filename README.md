@@ -11,7 +11,8 @@ Twice daily, a scheduled GitHub Actions workflow pulls the latest entry from a N
 | `index.html` | The current issue — the page GitHub Pages serves at the repo root |
 | `build-daily-prophet.ps1` | PowerShell script that queries the Notion API, parses the day's page into sections, and regenerates `index.html` plus an archive copy |
 | `issues/` | Archived past issues (`YYYYMMDD-AM.html`, `YYYYMMDD-PM.html`, etc.) and an `index.html` listing them |
-| `.github/workflows/publish-daily-prophet.yml` | Scheduled workflow — runs the build script twice daily (and on manual dispatch with an optional `issue_date` override), commits, and pushes if the output changed |
+| `validate-daily-prophet.ps1` | Post-build validation — fails the publish if the front page is incomplete, an archive ledger link points at a missing file, or the fallback page ships while today's issue exists |
+| `.github/workflows/publish-daily-prophet.yml` | Scheduled workflow — runs the build script twice daily (morning and evening ET; also on manual dispatch with an optional `issue_date` override), validates the rendered output, commits, and pushes if the output changed |
 | `favicon.svg` | Site favicon |
 
 ## How to run it

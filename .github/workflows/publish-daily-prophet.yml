@@ -45,6 +45,10 @@ jobs:
         shell: pwsh
         run: ./build-daily-prophet.ps1
 
+      - name: Validate rendered output
+        shell: pwsh
+        run: ./validate-daily-prophet.ps1
+
       - name: Check for changes
         id: changes
         shell: pwsh
