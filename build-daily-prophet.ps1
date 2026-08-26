@@ -326,7 +326,7 @@ function Render-HeadlineItem([string]$Roman, $Record) {
 <div class="hl-item">
   <div class="hl-n">$Roman</div>
   <div>
-    <div class="hl-h">$(HtmlEncode $Record.Headline)</div>
+    <h3 class="hl-h">$(HtmlEncode $Record.Headline)</h3>
     <div class="hl-s">$(HtmlEncode $Record.Summary)</div>
 $sourceMarkup
   </div>
@@ -357,7 +357,7 @@ function Render-WatchCard($Callout) {
 
 @"
 <div class="watch-card $cssClass">
-  <div class="wc-name"><span style="margin-right:.3rem">$(HtmlEncode $icon)</span>$(HtmlEncode $title)</div>
+  <h3 class="wc-name"><span style="margin-right:.3rem">$(HtmlEncode $icon)</span>$(HtmlEncode $title)</h3>
   <div class="$bodyClass">$(HtmlEncode $body)</div>
 </div>
 "@
@@ -488,42 +488,42 @@ code{font-family:'Courier New',monospace;font-size:.85rem;background:rgba(139,10
 <div class="mote" style="left:91%;animation-duration:29s;animation-delay:12s;--dx:-20px"></div>
 
 <div class="paper">
-  <div class="masthead">
+  <header class="masthead">
     <div class="mh-bar">
       <div class="mh-rule"></div>
       <div class="mh-eyebrow">Curated from your universe &middot; Est. by order of the Ministry</div>
       <div class="mh-rule"></div>
     </div>
-    <div class="mh-title">The Daily Prophet</div>
+    <h1 class="mh-title">The Daily Prophet</h1>
     <div class="mh-subtitle">Autonomous Intelligence Dispatch &middot; America / New York</div>
     <div class="mh-meta">
       <span>Vol. I &nbsp;&middot;&nbsp; Issue&nbsp;<strong>{{ISSUE_ID}}</strong></span>
       <div class="seal">&#x1F989;</div>
       <span>{{DATE_DISPLAY}} &nbsp;&middot;&nbsp; Owl-posted at dawn</span>
     </div>
-  </div>
+  </header>
 
   <div class="ribbon">{{RIBBON_ICON}}&nbsp;&nbsp;{{EDITION}}&nbsp;&nbsp;{{RIBBON_ICON}}</div>
 
-  <div class="body">
+  <main class="body">
     <div class="dispatch fi d1">
       <div class="dispatch-owl">&#x1F989;</div>
       <div class="dispatch-head">The Daily Prophet</div>
       <div class="dispatch-sub">{{DISPATCH_SUBTITLE}}</div>
     </div>
-    <div class="nav-strip fi d1">{{NAV_STRIP}}</div>
+    <nav class="nav-strip fi d1" aria-label="In this issue">{{NAV_STRIP}}</nav>
 
     <hr class="dbl">
 
     <div class="sec fi d2">
       <div class="sec-rl"></div><span class="sec-ico">&#x1F5DE;&#xFE0F;</span>
-      <span class="sec-lbl">Front Page &mdash; Top Headlines</span>
+      <h2 class="sec-lbl">Front Page &mdash; Top Headlines</h2>
       <div class="sec-rr"></div>
     </div>
 
     <div class="lead fi d2">
       <div class="lead-n">I.</div>
-      <div class="lead-hl">{{LEAD_HEADLINE}}</div>
+      <h3 class="lead-hl">{{LEAD_HEADLINE}}</h3>
       <div class="lead-sum">{{LEAD_SUMMARY}}</div>
       <span class="src">{{LEAD_SOURCE}}</span>
     </div>
@@ -537,7 +537,7 @@ code{font-family:'Courier New',monospace;font-size:.85rem;background:rgba(139,10
 
     <div class="sec fi d3">
       <div class="sec-rl"></div><span class="sec-ico">&#x1F3F0;</span>
-      <span class="sec-lbl">Hogwarts Watchlist &mdash; Your Active Worlds</span>
+      <h2 class="sec-lbl">Hogwarts Watchlist &mdash; Your Active Worlds</h2>
       <div class="sec-rr"></div>
     </div>
     <div class="watch-grid fi d4">{{WATCHLIST_CARDS}}</div>
@@ -548,14 +548,14 @@ code{font-family:'Courier New',monospace;font-size:.85rem;background:rgba(139,10
       <div>
         <div class="sec">
           <div class="sec-rl"></div><span class="sec-ico">&#x1F9EA;</span>
-          <span class="sec-lbl">Potion Notes</span>
+          <h2 class="sec-lbl">Potion Notes</h2>
           <div class="sec-rr"></div>
         </div>
         {{POTION_NOTES}}
 
         <div class="sec" style="margin-top:1.3rem">
           <div class="sec-rl"></div><span class="sec-ico">&#x1FA84;</span>
-          <span class="sec-lbl">Today's Spells</span>
+          <h2 class="sec-lbl">Today's Spells</h2>
           <div class="sec-rr"></div>
         </div>
         <ul class="spell-list">{{SPELLS}}</ul>
@@ -563,14 +563,14 @@ code{font-family:'Courier New',monospace;font-size:.85rem;background:rgba(139,10
       <div>
         <div class="sec">
           <div class="sec-rl"></div><span class="sec-ico">&#x1F5FA;&#xFE0F;</span>
-          <span class="sec-lbl">The Map</span>
+          <h2 class="sec-lbl">The Map</h2>
           <div class="sec-rr"></div>
         </div>
         <div class="map-note">{{THE_MAP}}</div>
 
         <div class="sec" style="margin-top:1.3rem">
           <div class="sec-rl"></div><span class="sec-ico">&#x1F30D;</span>
-          <span class="sec-lbl">Translation</span>
+          <h2 class="sec-lbl">Translation</h2>
           <div class="sec-rr"></div>
         </div>
         <details class="tl-wrap">
@@ -582,13 +582,13 @@ code{font-family:'Courier New',monospace;font-size:.85rem;background:rgba(139,10
         </details>
       </div>
     </div>
-  </div>
+  </main>
 
-  <div class="footer fi d6">
+  <footer class="footer fi d6">
     <div class="footer-txt">Printed by Order of the Ministry of Magic &nbsp;&middot;&nbsp; {{EDITION}} &nbsp;&middot;&nbsp; Issue {{ISSUE_ID}} &nbsp;&middot;&nbsp; {{DATE_DISPLAY}}</div>
     <a href="{{ARCHIVE_HREF}}" style="font-family:'IM Fell English SC',serif;font-size:.6rem;letter-spacing:.18em;color:var(--gold);text-decoration:none;">&mdash; The Archive &mdash;</a>
     <div class="footer-motto">"Owl-posted at dawn. Curated from your universe."</div>
-  </div>
+  </footer>
 </div>
 </body>
 </html>
@@ -873,26 +873,26 @@ body{background:#18110a;min-height:100vh;padding:2rem 1rem 5rem;font-family:'IM 
 </head>
 <body>
 <div class="paper">
-  <div class="masthead">
+  <header class="masthead">
     <div class="mh-bar">
       <div class="mh-rule"></div>
       <div class="mh-eyebrow">Curated from your universe &middot; Est. by order of the Ministry</div>
       <div class="mh-rule"></div>
     </div>
-    <div class="mh-title">The Daily Prophet &mdash; Archive</div>
+    <h1 class="mh-title">The Daily Prophet &mdash; Archive</h1>
     <div class="mh-subtitle">Past owl-posted editions from the Daily Prophet Issues desk</div>
     <div class="mh-meta">Collected from DB | Daily Prophet Issues</div>
-  </div>
-  <div class="body">
-    <div class="archive-head">Issue Ledger</div>
+  </header>
+  <main class="body">
+    <h2 class="archive-head">Issue Ledger</h2>
     <div class="archive-list">
 $archiveRows
     </div>
-  </div>
-  <div class="footer">
+  </main>
+  <footer class="footer">
     <div class="footer-txt">Printed by Order of the Ministry of Magic &nbsp;&middot;&nbsp; Archive Ledger</div>
     <a class="footer-link" href="../">Return to Today&apos;s Issue</a>
-  </div>
+  </footer>
 </div>
 </body>
 </html>
