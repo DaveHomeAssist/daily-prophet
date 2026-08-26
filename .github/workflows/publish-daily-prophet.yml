@@ -2,8 +2,12 @@ name: Publish Daily Prophet
 
 on:
   schedule:
+    # Morning edition: 6:05 AM ET (EDT / EST)
     - cron: '5 10 * * *'
     - cron: '5 11 * * *'
+    # Evening edition: 6:05 PM ET (EDT / EST)
+    - cron: '5 22 * * *'
+    - cron: '5 23 * * *'
   workflow_dispatch:
     inputs:
       issue_date:

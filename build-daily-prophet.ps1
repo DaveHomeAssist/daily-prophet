@@ -902,13 +902,12 @@ $archiveRows
 $issueDate = Get-IssueDate
 $dateDisplay = Get-DateDisplay $issueDate
 
+# The front page shows the day's most recently published edition (Morning,
+# Evening, or Breaking), not only Morning, so the evening run can promote the
+# PM briefing.
 $queryBody = @{
-  filter = @{
-    and = @(
-      @{ property = 'Date'; date = @{ equals = $issueDate } },
-      @{ property = 'Edition'; select = @{ equals = 'Morning' } }
-    )
-  }
+  filter = @{ property = 'Date'; date = @{ equals = $issueDate } }
+  sorts  = @(@{ timestamp = 'created_time'; direction = 'descending' })
 }
 
 $queryResponse = Invoke-DatabaseQuery $queryBody
@@ -918,34 +917,30 @@ if (-not (Test-Path -LiteralPath $IssuesDirectory)) {
   New-Item -ItemType Directory -Path $IssuesDirectory | Out-Null
 }
 
-if (-not $queryResponse.results -or $queryResponse.results.Count -eq 0) {
-  $html = Render-NoIssuePage $dateDisplay
-  Write-Utf8File -Path $OutputPath -Content $html
-  Write-Utf8File -Path $ArchiveIndexPath -Content (Render-ArchiveIndex $allIssuePages)
-  Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $EmDash + ' ' + $EmDash + ' ' + $issueDate)
-  exit 0
-}
-
-$currentPage = $queryResponse.results[0]
-$currentRender = Get-IssueRenderData -Page $currentPage -ArchiveHref 'issues/'
-Write-Utf8File -Path $OutputPath -Content $currentRender.Html
-
+# Materialize every archived issue before choosing the front page, so the
+# archive ledger never links to a file a fallback run skipped writing.
 $archiveCount = 0
 foreach ($issuePage in @($allIssuePages)) {
   $issueId = Get-PropertyPlainText $issuePage.properties.'Issue ID'
   if (-not $issueId) { continue }
 
-  $renderedIssue = if ($issuePage.id -eq $currentPage.id) {
-    Get-IssueRenderData -Page $issuePage -ArchiveHref './'
-  } else {
-    Get-IssueRenderData -Page $issuePage -ArchiveHref './'
-  }
-
+  $renderedIssue = Get-IssueRenderData -Page $issuePage -ArchiveHref './'
   $archivePath = Join-Path $IssuesDirectory (Get-IssueArchiveFileName $renderedIssue.IssueId)
   Write-Utf8File -Path $archivePath -Content $renderedIssue.Html
   $archiveCount++
 }
 
 Write-Utf8File -Path $ArchiveIndexPath -Content (Render-ArchiveIndex $allIssuePages)
-Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $currentRender.IssueId + ' ' + $EmDash + ' ' + $issueDate)
+
+if (-not $queryResponse.results -or $queryResponse.results.Count -eq 0) {
+  $html = Render-NoIssuePage $dateDisplay
+  Write-Utf8File -Path $OutputPath -Content $html
+  Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $EmDash + ' ' + $EmDash + ' ' + $issueDate + ' (' + $archiveCount + ' archived)')
+  exit 0
+}
+
+$currentPage = $queryResponse.results[0]
+$currentRender = Get-IssueRenderData -Page $currentPage -ArchiveHref 'issues/'
+Write-Utf8File -Path $OutputPath -Content $currentRender.Html
+Write-Host ('Written: index.html ' + $EmDash + ' Issue ' + $currentRender.IssueId + ' ' + $EmDash + ' ' + $issueDate + ' (' + $archiveCount + ' archived)')
 Write-Host ('Archived: ' + $archiveCount + ' issues')
