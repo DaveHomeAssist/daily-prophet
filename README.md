@@ -1,8 +1,8 @@
 # The Daily Prophet
 
-A wizarding-newspaper-themed personal briefing page, auto-published twice a day from a Notion database and served as a static GitHub Pages site.
+A wizarding-newspaper-themed personal briefing page, published on demand from a Notion database and served as a static GitHub Pages site.
 
-Twice daily, a scheduled GitHub Actions workflow pulls the latest entry from a Notion database and re-renders `index.html` — a Harry Potter *Daily Prophet* pastiche with a front page, a "Hogwarts Watchlist" of active projects, potion notes, spells, a map note, and an optional translated briefing. Each rendered issue is also archived under `issues/` so past editions stay browsable.
+When dispatched manually, GitHub Actions pulls the selected day's briefing from Notion and regenerates `index.html`. The issue includes a front page, a "Hogwarts Watchlist" of active projects, potion notes, spells, a map note, and an optional translated briefing. Each rendered issue is also archived under `issues/` so past editions stay browsable.
 
 ## What's here
 
@@ -12,15 +12,14 @@ Twice daily, a scheduled GitHub Actions workflow pulls the latest entry from a N
 | `build-daily-prophet.ps1` | PowerShell script that queries the Notion API, parses the day's page into sections, and regenerates `index.html` plus an archive copy |
 | `issues/` | Archived past issues (`YYYYMMDD-AM.html`, `YYYYMMDD-PM.html`, etc.) and an `index.html` listing them |
 | `validate-daily-prophet.ps1` | Post-build validation — fails the publish if the front page is incomplete, an archive ledger link points at a missing file, or the fallback page ships while today's issue exists |
-| `.github/workflows/publish-daily-prophet.yml` | Scheduled workflow — runs the build script twice daily (morning and evening ET; also on manual dispatch with an optional `issue_date` override), validates the rendered output, commits, and pushes if the output changed |
+| `.github/workflows/publish-daily-prophet.yml` | Manual workflow that runs the build script, validates the rendered output, and commits and pushes changed output |
 | `favicon.svg` | Site favicon |
 
 ## How to run it
 
 There's no app to install — this is a PowerShell build script plus a static HTML output.
 
-- **Automatic (normal path):** the GitHub Actions workflow runs on its cron schedule and does everything (build, commit, push). No local action needed.
-- **Manual re-run:** trigger the workflow by hand from the Actions tab (`workflow_dispatch`), optionally passing an `issue_date` (`YYYY-MM-DD`) to rebuild a specific day.
+- **Publish from GitHub Actions:** choose **Publish Daily Prophet** and select **Run workflow** (`workflow_dispatch`). Optionally enter `issue_date` in `YYYY-MM-DD` format to build a specific day. Scheduled publication is paused.
 - **Run locally:**
   ```powershell
   $env:NOTION_API_KEY = "<your Notion integration token>"
